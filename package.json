@@ -19,12 +19,13 @@
     "gate:control-plane": "vitest run tests/control-plane.test.ts",
     "test:unit": "vitest run tests/unit",
     "smoke": "vitest run tests/smoke.test.ts",
-    "gates": "npm run gate:boundaries && npm run gate:codegen-drift && npm run gate:containers && npm run gate:sla-fixtures && npm run gate:isolation && npm run gate:control-plane",
+    "gates": "npm run gate:boundaries && npm run gate:codegen-drift && npm run gate:containers && npm run gate:built-artifact && npm run gate:sla-fixtures && npm run gate:isolation && npm run gate:control-plane",
     "negative-controls": "bash scripts/negative-controls.sh",
     "gate:containers": "node scripts/gate-containers.mjs",
     "compose:up": "docker compose up -d --wait",
     "compose:down": "docker compose down -v",
-    "compose:smoke": "bash scripts/compose-smoke.sh"
+    "compose:smoke": "bash scripts/compose-smoke.sh",
+    "gate:built-artifact": "node scripts/gate-built-artifact.mjs"
   },
   "dependencies": {
     "pg": "8.23.0"

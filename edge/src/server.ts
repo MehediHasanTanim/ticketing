@@ -1,12 +1,12 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
-import { getPool, withScope } from '@adapters/postgres/pool';
-import { pingRedis } from '@adapters/cache/redis-probe';
-import { cellName } from '@adapters/postgres/config';
-import { byId, list } from '@adapters/postgres/fixture-note-read-model';
-import { handleRecordFixtureNote } from '@app/record-fixture-note';
-import { systemClock } from '@app/clock';
-import { foldSla } from '@core/job';
-import { ValidationError } from '@core/fixture/note';
+import { getPool, withScope } from '../../adapters/src/postgres/pool';
+import { pingRedis } from '../../adapters/src/cache/redis-probe';
+import { cellName } from '../../adapters/src/postgres/config';
+import { byId, list } from '../../adapters/src/postgres/fixture-note-read-model';
+import { handleRecordFixtureNote } from '../../app/src/record-fixture-note';
+import { systemClock } from '../../app/src/clock';
+import { foldSla } from '../../core/src/job';
+import { ValidationError } from '../../core/src/fixture/note';
 import { resolvePrincipal, type Principal } from './auth';
 import { envelope, statusFor, type ErrorCode } from './errors';
 
@@ -84,16 +84,27 @@ export function createApp(): Server {
     try {
       // Health is the only unauthenticated route.
       if (req.method === 'GET' && url.pathname === '/v1/health') {
+        // Health NEVER throws and never 500s. An orchestrator and a property
+        // administrator both read it to find out what is wrong; a 500 tells them
+        // nothing except that the thing they were asking is also broken. A missing
+        // DATABASE_URL is a config error that surfaces here as `unreachable`,
+        // which is exactly what the reader needs to see.
         const [eventStore, cache] = await Promise.all([
-          getPool().query('SELECT 1').then(() => 'ok' as const).catch(() => 'unreachable' as const),
+          Promise.resolve()
+            .then(() => getPool().query('SELECT 1'))
+            .then(() => 'ok' as const)
+            .catch(() => 'unreachable' as const),
           // Fallback matches the HOST-published port in docker-compose.yml and
           // .env.example (6380), not Redis's standard 6379 - a developer running
           // the API on the host against the compose cell reaches it there.
           pingRedis(process.env.REDIS_URL ?? 'redis://127.0.0.1:6380')
-            .then((ok) => (ok ? 'ok' as const : 'unreachable' as const)),
+            .then((ok) => (ok ? 'ok' as const : 'unreachable' as const))
+            .catch(() => 'unreachable' as const),
         ]);
         const status = eventStore === 'ok' && cache === 'ok' ? 'ok' : 'degraded';
-        return json(res, 200, { status, api: 'ok', eventStore, cache, cell: cellName() });
+        let cell = 'unconfigured';
+        try { cell = cellName(); } catch { /* CELL_NAME unset - report it, do not crash */ }
+        return json(res, 200, { status, api: 'ok', eventStore, cache, cell });
       }
 
       // ---- tenancy resolution: the one boundary (AD-3) ----

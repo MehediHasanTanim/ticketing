@@ -1,4 +1,8 @@
-# syntax=docker/dockerfile:1.7
+# NO `# syntax=` DIRECTIVE, DELIBERATELY. Pinning the Dockerfile frontend makes
+# every build depend on pulling docker/dockerfile from Docker Hub, and this file
+# uses no frontend-version-specific syntax (no heredocs, no RUN --mount). Paying a
+# hard registry dependency for a feature we do not use breaks offline, air-gapped
+# and mirrored builds for nothing. Add it back the day a 1.x-only feature is needed.
 #
 # JazzTicketing API - one image per cell (AD-4). Story 1.0 / AC-5.
 #
@@ -14,14 +18,19 @@
 # unpinned tag is a supply-chain hole, not a style preference. See
 # docs/stack-versions.md.
 
+# The base image is a build ARG so a mirrored, air-gapped or offline build can
+# substitute one without forking this file. The DEFAULT is the real base; nothing
+# about a normal `docker build .` changes.
+ARG NODE_IMAGE=node:22-alpine
+
 # ---------------------------------------------------------------- deps (prod only)
-FROM node:22-alpine AS deps
+FROM ${NODE_IMAGE} AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
 
 # ------------------------------------------------------------------------- build
-FROM node:22-alpine AS build
+FROM ${NODE_IMAGE} AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
@@ -35,7 +44,7 @@ COPY contracts ./contracts
 RUN npx tsc -p tsconfig.json
 
 # ----------------------------------------------------------------------- runtime
-FROM node:22-alpine AS runtime
+FROM ${NODE_IMAGE} AS runtime
 # PORT is the port the API LISTENS on, in a container or on a host. 3001 rather
 # than 3000 at Tanim's request (2026-09-03).
 ENV NODE_ENV=production \

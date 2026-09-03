@@ -11,7 +11,7 @@
  * tenant in the cell. That is exactly why the application role cannot do it.
  */
 import { Client } from 'pg';
-import { adminConnectionString } from '@adapters/postgres/config';
+import { adminConnectionString } from '../../adapters/src/postgres/config';
 
 export async function rebuildProjections(): Promise<{ events: number; notes: number; ms: number }> {
   const started = Date.now();

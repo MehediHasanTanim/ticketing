@@ -1,4 +1,8 @@
-# syntax=docker/dockerfile:1.7
+# NO `# syntax=` DIRECTIVE, DELIBERATELY. Pinning the Dockerfile frontend makes
+# every build depend on pulling docker/dockerfile from Docker Hub, and this file
+# uses no frontend-version-specific syntax (no heredocs, no RUN --mount). Paying a
+# hard registry dependency for a feature we do not use breaks offline, air-gapped
+# and mirrored builds for nothing. Add it back the day a 1.x-only feature is needed.
 #
 # JazzTicketing console - static build served by nginx. Story 1.0 / AC-5.
 #
@@ -10,7 +14,12 @@
 # [UNVERIFIED] Base image tags are not digest-pinned - registries were blocked
 # where this was written. Pin by digest before deploying.
 
-FROM node:22-alpine AS build
+# Both bases are build ARGs so a mirrored or air-gapped build can substitute them.
+# The defaults are the real bases.
+ARG NODE_IMAGE=node:22-alpine
+ARG NGINX_IMAGE=nginx:1.27-alpine
+
+FROM ${NODE_IMAGE} AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
@@ -26,7 +35,7 @@ RUN node scripts/lint-logical-direction.mjs \
  && npx tsc -b \
  && npx vite build
 
-FROM nginx:1.27-alpine AS runtime
+FROM ${NGINX_IMAGE} AS runtime
 ENV API_BASE_URL=/v1 \
     CELL_NAME=unknown
 

@@ -1,9 +1,9 @@
 import type { PoolClient } from 'pg';
-import type { ClockPort } from '@core/ports';
-import type { Scope } from '@core/tenancy';
-import { recordFixtureNote } from '@core/fixture/note';
-import { appendEvents } from '@adapters/postgres/event-store';
-import { projectFixtureNote } from '@adapters/postgres/fixture-note-read-model';
+import type { ClockPort } from '../../core/src/ports';
+import type { Scope } from '../../core/src/tenancy';
+import { recordFixtureNote } from '../../core/src/fixture/note';
+import { appendEvents } from '../../adapters/src/postgres/event-store';
+import { projectFixtureNote } from '../../adapters/src/postgres/fixture-note-read-model';
 
 /**
  * Command handler. The event and its projection commit in the SAME transaction,

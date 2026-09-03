@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import type { Scope } from '@core/tenancy';
-import { asTenantId, asPropertyId, asStaffMemberId } from '@core/tenancy';
+import type { Scope } from '../../core/src/tenancy';
+import { asTenantId, asPropertyId, asStaffMemberId } from '../../core/src/tenancy';
 
 /**
  * FIXTURE AUTH STUB - Story 1.0 only, and gated behind FIXTURE_AUTH=1 so it cannot

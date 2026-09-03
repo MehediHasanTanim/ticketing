@@ -1,6 +1,6 @@
 import { Pool, type PoolClient } from 'pg';
-import type { Scope } from '@core/tenancy';
-import { assertScope } from '@core/tenancy';
+import type { Scope } from '../../../core/src/tenancy';
+import { assertScope } from '../../../core/src/tenancy';
 import { appConnectionString } from './config';
 
 let pool: Pool | undefined;

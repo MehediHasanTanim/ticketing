@@ -1,5 +1,5 @@
 import type { PoolClient } from 'pg';
-import type { FixtureNote } from '@core/fixture/note';
+import type { FixtureNote } from '../../../core/src/fixture/note';
 
 export interface FixtureNoteRow extends FixtureNote {
   readonly tenantId: string;

@@ -95,6 +95,18 @@ sed -i 's|      - "${CONSOLE_PORT:-8081}:8081"|      - "8081:8081"|' docker-comp
 expect_red "container gate, no hard-coded host ports (AC-5)" node scripts/gate-containers.mjs
 cp /tmp/compose.ports.bak docker-compose.yml
 
+echo "== 11. built-artifact gate: reintroduce a compile-time-only path alias =="
+cp edge/src/server.ts /tmp/server.alias.bak
+cp tsconfig.json /tmp/tsconfig.alias.bak
+sed -i "s|from '../../adapters/src/postgres/pool'|from '@adapters/postgres/pool'|" edge/src/server.ts
+node -e "
+const fs=require('fs'); const d=JSON.parse(fs.readFileSync('tsconfig.json','utf8'));
+d.compilerOptions.baseUrl='.'; d.compilerOptions.paths={'@adapters/*':['adapters/src/*']};
+fs.writeFileSync('tsconfig.json', JSON.stringify(d,null,2)+'\n');"
+expect_red "built artifact runs (AC-5)" node scripts/gate-built-artifact.mjs
+cp /tmp/server.alias.bak edge/src/server.ts
+cp /tmp/tsconfig.alias.bak tsconfig.json
+
 echo
 echo "negative controls: ${pass} correctly went red, ${fail} did not, ${unverified} unverifiable here"
 [ "${fail}" -eq 0 ]

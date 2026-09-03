@@ -1,7 +1,7 @@
 import type { PoolClient } from 'pg';
-import type { DomainEvent } from '@core/events';
-import type { Scope } from '@core/tenancy';
-import { asTenantId, asPropertyId } from '@core/tenancy';
+import type { DomainEvent } from '../../../core/src/events';
+import type { Scope } from '../../../core/src/tenancy';
+import { asTenantId, asPropertyId } from '../../../core/src/tenancy';
 
 interface Row {
   event_id: string; type: string; tenant_id: string; property_id: string;

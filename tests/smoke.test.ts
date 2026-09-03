@@ -23,6 +23,31 @@ describe('cell smoke test', () => {
     expect(body.cell.length).toBeGreaterThan(0);
   });
 
+  it('health never 500s - it reports what is unreachable', async () => {
+    // A 500 from health tells a property administrator nothing except that the
+    // thing they used to ask what is wrong is also broken. Observed for real when
+    // the built artifact ran on a machine with no datastore configuration.
+    const saved = { db: process.env.DATABASE_URL_APP, redis: process.env.REDIS_URL };
+    try {
+      delete process.env.DATABASE_URL_APP;
+      process.env.REDIS_URL = 'redis://127.0.0.1:1';
+      const { closePool } = await import('../adapters/src/postgres/pool');
+      await closePool();
+      const res = await fetch(`${h.base}/v1/health`);
+      expect(res.status).toBe(200);
+      const body = await res.json() as Record<string, string>;
+      expect(body.status).toBe('degraded');
+      expect(body.api).toBe('ok');
+      expect(body.eventStore).toBe('unreachable');
+      expect(body.cache).toBe('unreachable');
+    } finally {
+      if (saved.db) process.env.DATABASE_URL_APP = saved.db;
+      if (saved.redis) process.env.REDIS_URL = saved.redis;
+      const { closePool } = await import('../adapters/src/postgres/pool');
+      await closePool();
+    }
+  });
+
   it('a command returns the accepted event and reaches the projection', async () => {
     const text = `smoke ${Date.now()}`;
     const post = await fetch(`${h.base}/v1/commands/record-fixture-note`, {

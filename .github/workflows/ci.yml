@@ -72,6 +72,9 @@ jobs:
       - run: npm run build
       - name: migrations applied from source (AC-5)
         run: npm run migrate
+      - name: GATE the built artifact actually runs (AC-5)
+        # Tests import TypeScript. This runs `node dist/...`, which is what ships.
+        run: npm run gate:built-artifact
       - name: GATE cross-tenant isolation (AC-4)
         run: npm run gate:isolation
       - name: GATE control plane holds no guest data (AC-5)

@@ -113,9 +113,19 @@ never failed is not known to work.
 | Cross-tenant isolation | `npm run gate:isolation` | AD-3 / DG-1 through every public interface |
 | Control plane holds no guest data | `npm run gate:control-plane` | AD-4 |
 | Container definitions | `npm run gate:containers` | non-root, health-checked, no baked secrets, ordered startup, no host bind mounts, no hard-coded host ports |
+| The built artifact runs | `npm run gate:built-artifact` | `node dist/edge/src/main.js` serves `/v1/health` and drains on SIGTERM |
 
 `npm run gates` runs them all. `npm run smoke` proves the cell actually serves a
 command end to end and that a projection rebuild reproduces the same state.
+
+## No path aliases
+
+Imports are relative. `@core/*`-style tsconfig `paths` are **compile-time only** -
+`tsc` does not rewrite them - so `node dist/...` fails with `MODULE_NOT_FOUND` while
+every test passes, because vitest resolves the aliases itself. That shipped in Story
+1.0 and was caught by the first thing to run the built artifact: the API container.
+Layer boundaries are enforced by `dependency-cruiser`, not by import style, so the
+aliases bought nothing. `npm run gate:built-artifact` now guards it.
 
 ## Two things to know before writing any feature code
 

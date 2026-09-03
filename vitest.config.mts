@@ -1,19 +1,21 @@
 import { defineConfig } from 'vitest/config';
-import { resolve } from 'node:path';
 
+/**
+ * NO PATH ALIASES, DELIBERATELY.
+ *
+ * Story 1.0 originally used `@core/*`, `@app/*`, `@adapters/*` tsconfig paths.
+ * Those are COMPILE-TIME ONLY - `tsc` does not rewrite them - so `node dist/...`
+ * failed with MODULE_NOT_FOUND while every test passed, because vitest resolved
+ * the aliases itself. The built artifact had never been executed.
+ *
+ * Found by running the API container. Fixed by using relative imports everywhere,
+ * so tests resolve modules exactly the way Node will at runtime. Layer boundaries
+ * are enforced by dependency-cruiser, not by import style, so nothing was lost.
+ */
 export default defineConfig({
-  resolve: {
-    alias: {
-      '@core': resolve(__dirname, 'core/src'),
-      '@adapters': resolve(__dirname, 'adapters/src'),
-      '@app': resolve(__dirname, 'app/src'),
-      '@contracts': resolve(__dirname, 'contracts'),
-    },
-  },
   test: {
     include: ['tests/**/*.test.ts'],
     environment: 'node',
-    // Integration tests share one Postgres cell; run them in one process.
     fileParallelism: false,
     testTimeout: 30_000,
     hookTimeout: 30_000,
