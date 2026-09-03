@@ -476,3 +476,104 @@ shows `api 3001->3001`, `console 8081->8081`, `postgres 5433->5432`,
 POSTGRES_PORT=6543 REDIS_PORT=6399`) resolves correctly including the console's
 derived `API_BASE_URL`. Re-verified on Tanim's machine: build clean, container gate
 clean, unit tests 11/11.
+
+---
+
+## Addendum — the containers were run, 2026-09-03
+
+Tanim asked for the containers to be run. They were, and doing so found a bug that
+every test had missed.
+
+### Getting them to build at all
+
+Every container registry — Docker Hub, GHCR, ECR Public, quay.io, gcr.io,
+registry.k8s.io and six others — is refused by egress policy. Two changes made a
+build possible anywhere, and both are improvements in their own right:
+
+- **Base images are now build ARGs** (`NODE_IMAGE`, `NGINX_IMAGE`) with the real
+  images as defaults. A normal `docker build .` is unchanged; an air-gapped or
+  mirrored build substitutes.
+- **The `# syntax=docker/dockerfile:1.7` directive is gone.** It made every build
+  depend on pulling `docker/dockerfile` from Docker Hub, and neither file uses
+  frontend-specific syntax. Paying a hard registry dependency for an unused feature
+  breaks offline builds for nothing.
+
+Substitute bases were then built from the host filesystem (`docker import` of a
+curated rootfs carrying node 22 and nginx). Full account of what that proves and
+what it does not: `docs/running-containers-without-a-registry.md`.
+
+### THE BUG: the built artifact had never been executed
+
+The API container crash-looped immediately:
+
+```
+Error: Cannot find module '@adapters/postgres/pool'
+Require stack: /app/dist/edge/src/server.js
+```
+
+Story 1.0 used `@core/*`, `@app/*`, `@adapters/*` tsconfig `paths`. **Those are
+compile-time only — `tsc` does not rewrite them in the emitted JavaScript.** So
+`node dist/edge/src/main.js` had never worked, while all 29 tests passed, because
+vitest resolved the aliases itself and the smoke test imported `createApp` from
+*source*. Nothing had ever run what the story ships.
+
+Fixed by using relative imports throughout and deleting the aliases from
+`tsconfig.json` and `vitest.config.mts`. Layer boundaries are enforced by
+`dependency-cruiser`, not by import style, so the aliases bought nothing and cost a
+non-functional artifact.
+
+**New gate — `npm run gate:built-artifact`.** Builds, spawns `node dist/...`, asserts
+it serves `/v1/health`, then sends SIGTERM and asserts a clean exit. It needs no
+Docker, so it runs on every commit — which is precisely the gap that let this
+through. Its negative control reintroduces an alias and confirms the gate goes red.
+
+### A second defect, found the same way
+
+Run on a machine with no datastore configuration, `/v1/health` returned **HTTP 500**:
+`getPool()` throws on a missing `DATABASE_URL_APP` before the probe runs. Health now
+never throws — 200 with `status: "degraded"`, naming which dependency is unreachable.
+A 500 from health tells a property administrator nothing except that the thing they
+used to ask what is wrong is also broken. Test added (30 tests now).
+
+### What actually ran
+
+```
+NAMES        STATUS                   PORTS
+jt-api       Up (healthy)             0.0.0.0:3001->3001/tcp
+jt-console   Up (healthy)             0.0.0.0:8081->8081/tcp
+
+API  /v1/health  -> {"status":"ok","api":"ok","eventStore":"ok","cache":"ok","cell":"local-eu-west-1"}
+API  uid         -> 1000 (node)          read-only rootfs: touch refused
+CON  /healthz    -> ok
+CON  /config.json-> {"apiBaseUrl":"http://localhost:3001/v1","cellName":"local-eu-west-1"}
+CON  uid         -> 101 (nginx)
+```
+
+Verified against the running containers, not against source:
+
+- both images built from the real Dockerfiles; `npm ci`, `tsc -b`, `vite build` and
+  the directional lint all ran **inside** the image builds;
+- Docker's own HEALTHCHECK reports both healthy;
+- a command POSTed to the container returned the accepted event with a ULID, and the
+  note came back through the projection;
+- **cross-tenant isolation held against the container** — tenant B asking for tenant
+  A's note got `404 {"code":"not_found",...}`; unauthenticated got 401;
+- the SLA fold served over HTTP returned `{"elapsedMs":1800001,"breached":true,"foldVersion":1}`;
+- `touch /app/nope` → `Read-only file system`;
+- `docker stop` produced `SIGTERM received, draining` → `drained, exiting`, then a
+  clean restart to healthy;
+- the console served its app shell, SPA fallback (200 on an unknown route), and
+  `Cache-Control: public, max-age=31536000, immutable` on hashed assets.
+
+Two defects in the **substitute base** were fixed in the substitute, not in the
+delivered Dockerfiles: a missing `librt.so.1` (native addons could not load) and
+`/tmp` permissions (nginx could not create temp paths). Neither applies to
+`node:22-alpine` or `nginx:1.27-alpine`.
+
+### Standing after this addendum
+
+30 tests, 7 gates, **11 negative controls — 10 confirmed red, 1 vacuous** without a
+Dart SDK. Still open and unchanged: the images have not been built on their *real*
+bases (CI's `container-images` job does that first), base tags are not digest-pinned,
+the Dart half of AD-14's gate has never executed, and T6's Flutter skeleton is not
+built.
