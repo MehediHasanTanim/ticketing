@@ -8,6 +8,7 @@ import { systemClock } from '../../app/src/clock';
 import { foldSla } from '../../core/src/job';
 import { ValidationError } from '../../core/src/fixture/note';
 import { resolvePrincipal, type Principal } from './auth';
+import { docsEnabled, serveDocsAsset, serveDocsPage, serveOpenApiDocument } from './docs';
 import { envelope, statusFor, type ErrorCode } from './errors';
 
 /**
@@ -82,8 +83,13 @@ export function createApp(): Server {
   return createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     try {
+      // GET and HEAD are equivalent on the public routes. Monitoring and probes
+      // routinely use HEAD, and a HEAD that 401s where GET succeeds is a bug
+      // nobody notices until an uptime check goes red.
+      const readMethod = req.method === 'GET' || req.method === 'HEAD';
+
       // Health is the only unauthenticated route.
-      if (req.method === 'GET' && url.pathname === '/v1/health') {
+      if (readMethod && url.pathname === '/v1/health') {
         // Health NEVER throws and never 500s. An orchestrator and a property
         // administrator both read it to find out what is wrong; a 500 tells them
         // nothing except that the thing they were asking is also broken. A missing
@@ -105,6 +111,30 @@ export function createApp(): Server {
         let cell = 'unconfigured';
         try { cell = cellName(); } catch { /* CELL_NAME unset - report it, do not crash */ }
         return json(res, 200, { status, api: 'ok', eventStore, cache, cell });
+      }
+
+      // ---- documentation, served from the schema of record ----
+      // Unauthenticated, like health, and for the same reason: the shape of an API
+      // is not tenant data, and every operation it describes is permission-gated
+      // server-side (AD-11). `API_DOCS=0` turns both routes off.
+      const isDocsPath = url.pathname === '/v1/openapi.json'
+        || url.pathname === '/v1/docs' || url.pathname === '/v1/docs/'
+        || url.pathname.startsWith('/v1/docs/assets/');
+
+      // Disabled means GONE, not "needs a credential". The spec documents 404 for
+      // a disabled docs route, and a 401 there would send a reader looking for a
+      // token that would not have helped.
+      if (isDocsPath && !docsEnabled()) return fail(res, 'not_found');
+
+      if (readMethod && docsEnabled()) {
+        const m = req.method ?? 'GET';
+        if (url.pathname === '/v1/openapi.json') return serveOpenApiDocument(res, m);
+        if (url.pathname === '/v1/docs' || url.pathname === '/v1/docs/') return serveDocsPage(res, m);
+        // Capture the whole remainder, not a single segment, so a traversal attempt
+        // is answered by the asset handler's 404 rather than falling through to the
+        // authenticated routes and getting a misleading 401.
+        const asset = /^\/v1\/docs\/assets\/(.*)$/.exec(url.pathname);
+        if (asset) return serveDocsAsset(decodeURIComponent(asset[1] ?? ''), req, res);
       }
 
       // ---- tenancy resolution: the one boundary (AD-3) ----

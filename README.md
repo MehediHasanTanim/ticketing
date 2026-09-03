@@ -131,6 +131,34 @@ never failed is not known to work.
 `npm run gates` runs them all. `npm run smoke` proves the cell actually serves a
 command end to end and that a projection rebuild reproduces the same state.
 
+## API documentation
+
+`GET /v1/docs` serves Swagger UI; `GET /v1/openapi.json` serves the document itself.
+Both are unauthenticated, like `/v1/health`. `API_DOCS=0` turns them into 404s.
+
+**The spec is not generated from the code.** `contracts/openapi.yaml` is the schema
+of record, and the TypeScript bindings, the Dart bindings and the served document
+are all generated **from** it. Generating a spec out of decorated controllers - the
+usual Swagger setup - would invert that and make the code the source, which is what
+the codegen-drift gate exists to prevent. Edit the YAML, run `npm run codegen`,
+commit the result; CI fails if you forget.
+
+Two implementation notes worth knowing:
+
+- **Swagger UI is self-hosted** from `swagger-ui-dist` inside the image. No CDN, so
+  it works air-gapped and loads no third-party script into an origin that also
+  serves authenticated endpoints. The page carries a tight
+  `Content-Security-Policy`, and only the five assets it actually needs are
+  reachable - an extension match served every script in the package.
+- **The spec declares `bearerAuth` and applies it globally**, with `security: []` on
+  the three public routes. Without that, Swagger UI has no Authorize button and
+  every "Try it out" returns 401, which teaches the reader the wrong thing about the
+  API. A test asserts no non-public operation opts out of auth.
+
+Docs are on by default: every endpoint is permission-gated server-side (AD-11), and
+hiding an API's shape is not a security control - it mostly costs the engineers who
+need it. Operators who disagree have one variable.
+
 ## No path aliases
 
 Imports are relative. `@core/*`-style tsconfig `paths` are **compile-time only** -

@@ -16,8 +16,51 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Cell health - API, event store, cache reachability */
+        /**
+         * Cell health - API, event store, cache reachability
+         * @description Never throws and never returns 5xx. A missing DATABASE_URL surfaces here as `eventStore: unreachable` with status `degraded`, because a 500 from health tells the reader nothing except that the thing they asked with is also broken.
+         */
         get: operations["getHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/openapi.json": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * This document, as JSON
+         * @description Generated from `contracts/openapi.yaml` at build time and compiled into the artifact, so it cannot drift from the spec the bindings are generated from - the codegen-drift gate fails the build if it does.
+         */
+        get: operations["getOpenApiDocument"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/docs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Swagger UI
+         * @description Self-hosted from `swagger-ui-dist` - no CDN, so it works air-gapped and loads no third-party script into an authenticated origin. Set `API_DOCS=0` to disable, which returns 404.
+         */
+        get: operations["getApiDocs"];
         put?: never;
         post?: never;
         delete?: never;
@@ -209,6 +252,55 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Health"];
                 };
+            };
+        };
+    };
+    getOpenApiDocument: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description the OpenAPI 3.1 document */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getApiDocs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description an HTML page */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            /** @description docs disabled */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
