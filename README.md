@@ -33,11 +33,20 @@ framework into the domain.
 ### In containers, with nothing installed on the host
 
 ```bash
-docker compose up -d --wait     # postgres, redis, migrations, api, console
-curl localhost:3001/v1/health   # {"status":"ok",...}
-open http://localhost:8081      # the console
+docker compose up -d --wait --build   # postgres, redis, migrations, api, console
+curl localhost:3001/v1/health         # {"status":"ok",...}
+open http://localhost:8081            # the console
 docker compose down -v
 ```
+
+**Always pass `--build`** (or use `npm run compose:up`, which does). Compose does
+**not** rebuild when your sources change - it reuses whatever is already tagged
+`jazzticketing/api:dev` / `:console:dev`. Without `--build` a fix you just pulled
+is silently not running, and the failure you see is the old image. If a container
+is already up with a stale image, `npm run compose:rebuild` adds
+`--force-recreate`.
+
+`npm run compose:logs` tails everything when something comes up unhealthy.
 
 **Published ports**, all overridable (`API_PORT`, `CONSOLE_PORT`, `POSTGRES_PORT`,
 `REDIS_PORT`) and chosen to stay clear of a machine already running Postgres:
