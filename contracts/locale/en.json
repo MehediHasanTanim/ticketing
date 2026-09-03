@@ -1,0 +1,9 @@
+{
+  "error.unauthenticated": "Sign in to continue.",
+  "error.forbidden": "You do not have access to this.",
+  "error.not_found": "Not found.",
+  "error.validation_failed": "Check the highlighted fields.",
+  "error.upstream_unavailable": "Jazz Core is unavailable. Your work is saved.",
+  "health.ok": "Healthy",
+  "health.degraded": "Degraded"
+}

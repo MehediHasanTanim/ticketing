@@ -1,0 +1,613 @@
+---
+title: JazzTicketing
+created: 2026-08-29
+updated: 2026-08-29
+status: draft
+---
+
+# PRD: JazzTicketing
+*Working title — confirm.*
+
+## 0. Document Purpose
+
+This PRD is the contract between the product brief and the workflows downstream of it — UX (Sally), architecture (Winston), and epic/story breakdown. It is written for the Jazzware product and engineering group and for the management audience the brief is pitched to. It builds on `_bmad-output/planning-artifacts/briefs/brief-JazzTicketing-2026-08-29/brief.md` and its addendum; it does not restate them. Structure: a Glossary that fixes the vocabulary every later section and every downstream document must use verbatim, features grouped with globally numbered functional requirements nested under them, cross-cutting requirements in their own sections, and every inference tagged `[ASSUMPTION]` inline and indexed in §14. Where a decision belongs to architecture rather than product, it is named as a boundary and left open on purpose.
+
+## 1. Vision
+
+A hotel is a queue of promises with clocks on them. A guest asks for an iron, a shower backs up, a housekeeper finds a cracked mirror, a departing guest mentions at checkout that the room was never turned down. Each is work someone must own, finish, and be seen to have finished. Properties that run this well feel effortless to guests; properties that run it on radios and paper feel chaotic in ways guests describe in reviews without knowing why.
+
+JazzTicketing gives a property one operational spine for that work. Requests, room status, work orders, and service failures enter one system, get an owner and a clock, and move to closure on the phone in a housekeeper's apron or the console at the front desk. Managers see load and breaches while a shift is still recoverable rather than in a report the next morning. Over time the property accumulates something it has never had: a per-room and per-asset history that shows which faults recur, which recoveries cost the most, and where the shift plan is consistently wrong.
+
+The reason Jazzware is the one to build it is unglamorous and decisive. The hard part of this category is not the ticket model; it is the property-side plumbing — telephony, PMS, room status, wake-ups, minibar posting — and Jazzware already owns and supports that layer at these hotels. For an incumbent, integration is a services project quoted in months. For us it is configuration. That does not make the product better on a feature grid; it makes it deployable inside an installed base that already trusts us, which is the only advantage that matters for the first ten properties.
+
+## 2. Target User
+
+### 2.1 Jobs To Be Done
+
+- **Room attendant, engineer, runner** — "Tell me what to do next and let me finish it without calling the desk." Functional: receive, work, close. Emotional: not being blamed for work no one recorded.
+- **Front desk agent / telephone operator** — "Log what the guest just told me in seconds, without leaving the call, and know it landed on someone."
+- **Housekeeping supervisor** — "Know which rooms are ready, which are stuck, and which attendant is drowning, before the arrivals hit."
+- **Executive Housekeeper / Chief Engineer / Duty Manager** — "See the clock on everything my department owns, and move people before something breaches."
+- **General Manager / Director of Operations** — "Show me what keeps going wrong, what it cost us, and prove to the brand auditor and the owner that we run this properly."
+- **Corporate / management company operations** — "Compare properties on the same operational definitions instead of on each GM's spreadsheet."
+- **Property IT** — "Do not make me own another integration project, another server, or another set of credentials."
+
+### 2.2 Non-Users (v1)
+
+- **Guests.** No guest app, portal, or self-service surface in v1. Guests reach the hotel through the channels it already runs; JazzTicketing is what happens behind that.
+- **F&B, spa, and activity operations** as workflow owners. They can receive a dispatched Job, but their own service workflows are out.
+- **Finance and procurement.** Compensation is *logged*, not posted, approved, or reconciled.
+- **Owners and asset managers** as direct users. They are served through the GM's exports.
+
+### 2.3 Key User Journeys
+
+- **UJ-1. Rosa clears her board without calling the desk once.**
+  Rosa, a room attendant on a 22-credit board, speaks Tagalog as her first language and shares a house phone with the evening shift. She signs in on the shared device with her PIN; the app is already in Tagalog from her profile. Her board shows departures first, ordered by the arrivals the PMS says are coming. She taps Room 1204, starts it, and finds a cracked bathroom mirror. She raises a Fault from inside the room card, photographs it, and keeps cleaning — the Work Order routes itself to Engineering without her leaving the room or finding a supervisor. She marks 1204 clean; the PMS shows it ready before she reaches 1206. In the stairwell she loses signal, marks 1206 DND anyway, and the action syncs when she reaches the corridor. **Climax:** her board empties in the order the property actually needed the rooms. **Edge case:** if 1204 is inspected and rejected, it returns to her board flagged, with the supervisor's note and photo attached, ahead of her remaining rooms.
+
+- **UJ-2. Arif logs a request in eleven seconds without leaving the call.**
+  Arif, a telephone operator on evening shift, takes a call from Room 812. JazzTicketing has already opened a Request draft against 812 with the guest's name and stay context because the PBX told it who is calling. The guest wants an iron and a late checkout query passed to the front desk. Arif types "iron" into the Request catalog, picks the entry, and the department, SLA, and default duration populate; he adds a second Request for the front desk in the same panel. He says "It is on its way — about ten minutes." The floor runner's phone buzzes before Arif has hung up. **Climax:** the guest is told a number Arif did not have to guess, because the catalog knows this property's actual median. **Edge case:** if no runner accepts within the acceptance window, the Request escalates to the Duty Manager and Arif sees it turn red on his own open list.
+
+- **UJ-3. Miguel finds out the AC unit has been fixed four times already.**
+  Miguel, an engineer, accepts a hot/cold Job for Room 1518 on his phone. The Asset card for the fan-coil unit in 1518 shows four prior Work Orders in ninety days, each closed as "recharged". He recharges it again, but this time closes with root cause "recurring — suspect coil" and flags the Asset. **Climax:** the Chief Engineer's dashboard surfaces 1518 in the recurring-fault list that evening rather than after the fifth guest complaint. **Edge case:** if the room must come out of service, Miguel sets it Out of Order from the Job and the PMS stops selling it without anyone calling the front desk.
+
+- **UJ-4. Priyanka rebalances the floor at 10:40, not at handover.**
+  Priyanka, Executive Housekeeper, watches the web console during the checkout window. Two attendants on floors 9-11 are running twenty minutes behind median while floor 6 is clear, and fourteen arrivals are due before 15:00. She reassigns six rooms from the board of the attendant who is behind; the rooms appear on the receiving attendant's phone immediately, with a note. **Climax:** the property makes its arrival deadline without the front desk ever knowing there was a problem. **Edge case:** if an attendant has already started a room she reassigns, the app asks her to confirm the handover and preserves the started state and any Faults raised.
+
+- **UJ-5. Daniel turns a complaint at checkout into a logged recovery.**
+  Daniel, Duty Manager, meets a guest at checkout who is angry that the AC was never fixed. He opens the guest's stay in the console and sees the actual history: the Request logged at 22:10, dispatched at 22:14, closed at 23:40 with no follow-up. He logs a Glitch against the stay, category "engineering — guest impact", records the recovery he is authorizing, and links it to the Requests and Work Orders that caused it. **Climax:** the guest leaves with something done, and the cost, cause, and department are on the record instead of in Daniel's memory. **Edge case:** if the recovery exceeds his authorization threshold, the Glitch routes to the GM for approval and Daniel sees the decision on his own queue.
+
+- **UJ-6. Nadia walks into the owner's review with numbers.**
+  Nadia, the GM, opens the operations dashboard the morning of a quarterly review. She sees SLA compliance by department against the property's own pre-launch baseline, the ten Assets with the most repeat Work Orders, Glitch cost by category and department, and the response-time curve since go-live. She exports the brand-standard evidence pack for the audit next month. **Climax:** the argument in the room is about what to fix, not about whether the numbers are real. **Edge case:** when a department's data is thin because staff are not using mobile, the dashboard says so rather than reporting a flattering number.
+
+## 3. Glossary
+
+Downstream workflows and readers use these terms exactly. No synonyms anywhere in this document or its descendants.
+
+- **Tenant** — a commercial customer: a hotel brand, management company, or independent property group. Owns one or more Properties. Data never crosses Tenants.
+- **Property** — one hotel. The unit of configuration, reporting, and data isolation. Belongs to exactly one Tenant.
+- **Department** — an operational unit within a Property (Housekeeping, Engineering, Front Office, F&B, Security). Owns Jobs and has its own SLA configuration.
+- **Location** — an addressable place in a Property: a Room, a public area, a back-of-house space, or an outlet. Rooms carry a Room Number that matches the PMS.
+- **Room** — a Location that can be sold. Carries Room Status and may carry an Out-of-Order or Out-of-Service state.
+- **Room Status** — the current condition of a Room along two axes: occupancy (vacant / occupied) and cleanliness (dirty / clean / inspected). Synchronized with the PMS.
+- **Out of Order (OOO)** — a Room withdrawn from sale for a duration, deducted from sellable inventory. **Out of Service (OOS)** — a Room withdrawn from sale but still counted as inventory. Both originate from Engineering and are written back to the PMS.
+- **Stay** — a guest's occupancy of a Room between check-in and check-out, as the PMS defines it. Requests, Glitches, and Recoveries attach to a Stay.
+- **Request** — a unit of service work originating from or on behalf of a guest. Has a Requester, a Location, a Catalog Entry, an SLA Target, and a lifecycle.
+- **Work Order** — a unit of maintenance work against a Location or Asset. Either *reactive* (raised from a Fault) or *preventive* (generated from a PM Schedule).
+- **Job** — the umbrella term for a Request or a Work Order once it is assignable. Everything dispatched to a staff member is a Job. Housekeeping room cleaning appears as a Job only when dispatched individually; routine board work is a Room Assignment.
+- **Fault** — a reported defect at a Location or on an Asset. A Fault raises a reactive Work Order.
+- **Asset** — a maintainable item with an identity and a Location (fan-coil unit, lift, boiler, minibar fridge). Accumulates Work Order history.
+- **PM Schedule** — a rule that generates preventive Work Orders for an Asset or Asset class on a calendar, runtime, or occupancy trigger.
+- **Catalog Entry** — a configured request type (e.g. "extra towels", "hot/cold") carrying default Department, SLA Target, default duration, and required fields.
+- **SLA Target** — the elapsed time in which a Job of a given Catalog Entry must reach a given lifecycle state at a given Property. Distinct targets for acceptance and completion.
+- **SLA Clock** — the running measurement of elapsed time against an SLA Target, including any Pause Conditions.
+- **Pause Condition** — a configured circumstance that suspends an SLA Clock (guest DND, guest not in room, awaiting parts, awaiting guest availability).
+- **Breach** — an SLA Clock passing its SLA Target.
+- **Escalation** — the configured routing of a Breach or an unaccepted Job up a named chain of roles.
+- **Room Assignment** — the allocation of a set of Rooms to a Room Attendant for a shift, measured in Credits.
+- **Credit** — a Property-configured unit of housekeeping workload; a Room consumes a number of Credits by type (departure, stayover, turndown).
+- **Inspection** — a supervisor's scored check of a cleaned Room, resulting in pass or rejection.
+- **Glitch** — a recorded service failure affecting a Stay, with category, severity, responsible Department, and root cause.
+- **Recovery** — the compensation or remedial action taken in response to a Glitch, with a value and an approver.
+- **Lost & Found Item** — an item recorded as found at a Location, with chain of custody from found to returned or disposed.
+- **Adapter** — the Jazzware-operated integration component connecting a Property's PMS or PBX to JazzTicketing.
+- **Staff Member** — a person with a role at one or more Properties within one Tenant.
+- **Shared Device** — a Property-owned handset used by successive Staff Members across shifts.
+
+## 4. Features
+
+### 4.1 Tenancy, Identity, and Property Configuration
+
+**Description:** The multi-tenant foundation every other feature stands on. A Tenant contains Properties; a Property contains Departments, Locations, Staff Members, and its own configuration of Catalog Entries, SLA Targets, Escalation chains, and Credits. Corporate users at a management-company Tenant see across their Properties; a Property user sees only their own. Line staff sign in on Shared Devices with a short credential, corporate users through the identity provider the Tenant already uses. Realizes UJ-1, UJ-4, UJ-6.
+
+**Functional Requirements:**
+
+#### FR-1: Tenant and Property hierarchy
+An administrator can create a Tenant and Properties under it, and every record in the system resolves to exactly one Property.
+
+**Consequences (testable):**
+- A user scoped to Property A receives no record belonging to Property B through any interface, including search, reports, exports, and API responses.
+- A corporate-scoped user receives records only from Properties within their own Tenant.
+- Deleting a Property is prevented while operational records exist; it can only be deactivated.
+
+#### FR-2: Role-based access
+An administrator can assign Staff Members roles per Property that determine which Jobs they see, which they can act on, and which configuration they can change.
+
+**Consequences (testable):**
+- The shipped role set covers at minimum: line staff, supervisor, department manager, front office, duty manager, property administrator, corporate viewer.
+- A Staff Member with roles at multiple Properties within a Tenant can switch Property context without signing out.
+- Every permission-denied action is refused server-side, not only hidden in the interface.
+
+#### FR-3: Corporate SSO
+A Tenant administrator can connect an external identity provider so corporate and management users authenticate through it.
+**Consequences (testable):** SAML 2.0 or OIDC is supported; a deprovisioned identity loses access at next token validation; SSO is configurable per Tenant, not global.
+
+#### FR-4: Shared Device sign-in
+A Staff Member can sign in on a Shared Device with a short credential (PIN or badge) and sign out or be timed out without affecting other Staff Members' queued work.
+
+**Consequences (testable):**
+- Sign-in completes in under five seconds on a Property-issued handset.
+- A configurable inactivity timeout returns the device to the sign-in screen; queued offline actions belonging to the signed-out Staff Member survive the timeout and sync under that Staff Member's identity.
+- A PIN alone never grants access to configuration or reporting surfaces.
+
+#### FR-5: Property configuration
+A property administrator can configure Departments, Locations and Rooms, Catalog Entries, SLA Targets, Pause Conditions, Escalation chains, Credit values, and Inspection checklists for their Property without engineering involvement.
+**Consequences (testable):** Every configurable value is Property-scoped with a Tenant-level default; changes take effect for Jobs created after the change and never retroactively alter a running SLA Clock; every change is attributed to a Staff Member with a timestamp.
+
+#### FR-6: Audit trail
+The system records every state change on a Job, Glitch, Room Status, Lost & Found Item, and configuration value with actor, timestamp, and previous value.
+**Consequences (testable):** Audit entries are immutable and readable by property administrators and above; retention is configurable per Tenant within the bounds set in §11; an audit export for a date range is available to a property administrator.
+
+### 4.2 Guest Request Dispatch
+
+**Description:** The spine of the platform. A Request enters from a telephone operator, a front desk agent, a staff member, or a guest phone call surfaced by the Adapter, is matched to a Catalog Entry that supplies its Department and SLA Target, and is routed to a Staff Member who accepts, works, and closes it. An SLA Clock runs from creation, pauses on configured conditions, and escalates on Breach. Realizes UJ-2, UJ-5.
+
+**Functional Requirements:**
+
+#### FR-7: Create a Request
+A front office or staff user can create a Request against a Location in under fifteen seconds by selecting a Catalog Entry, with Department, SLA Target, and default duration populated from that entry. Realizes UJ-2.
+**Consequences (testable):** Catalog search returns matches on partial input within 300ms; a Request cannot be saved without a Location and a Catalog Entry; free-text notes and photos are optional on every Request.
+
+#### FR-8: Guest and Stay context on a Request
+A Request created against an occupied Room carries the current Stay's guest name, VIP or loyalty flag, and departure date as read from the PMS.
+**Consequences (testable):** Context is read at creation and re-read on display; when the PMS is unreachable the Request is still creatable and shows context as unavailable rather than blocking or showing stale data without a marker.
+
+#### FR-9: Routing and assignment
+The system routes a new Request to candidate Staff Members by Department, role, and current open Job load, and a supervisor can override the assignment at any point in the lifecycle.
+**Consequences (testable):** [ASSUMPTION] v1 routing is rule-based on Department + role + open-load, not skill-graph or predictive; an unassigned Request appears in the Department queue where any eligible Staff Member can accept it; reassignment preserves the SLA Clock, history, and attachments.
+
+#### FR-10: Request lifecycle
+A Request moves through logged → dispatched → accepted → in progress → completed → closed, and every transition records actor and timestamp. Realizes UJ-2.
+**Consequences (testable):** Illegal transitions are refused; a Request can be cancelled from any state before completed, with a required reason; completion requires the Catalog Entry's configured required fields (which may include a photo).
+
+#### FR-11: Acceptance window
+A dispatched Request that is not accepted within the Property's configured acceptance window escalates without human intervention. Realizes UJ-2.
+**Consequences (testable):** The acceptance window is configurable per Catalog Entry with a Department default; escalation on non-acceptance is distinguishable in reporting from escalation on completion Breach.
+
+#### FR-12: SLA Clock
+The system runs an SLA Clock against each Job's SLA Target from creation, and displays remaining time to every user who can see the Job.
+**Consequences (testable):** Elapsed time is computed server-side from timestamps, never from client clocks; the displayed remaining time on mobile and web agree within one second when both are online; time is presented in the Property's local timezone.
+
+#### FR-13: Pause Conditions
+A Staff Member can pause an SLA Clock by selecting a configured Pause Condition, and the paused interval is excluded from SLA measurement but retained in history.
+**Consequences (testable):** Only Pause Conditions configured for that Catalog Entry are offered; a pause requires a reason from the configured list; total paused duration is visible on the Job and reportable; a Job cannot remain paused beyond a configurable maximum without re-escalating.
+
+#### FR-14: Breach and Escalation
+On Breach, the system notifies the next role in the Property's Escalation chain and continues up the chain at configured intervals until the Job is accepted or closed. Realizes UJ-2.
+**Consequences (testable):** Escalation chains are configurable per Department; each escalation step is recorded on the Job; a Job that breaches while the property is offline escalates on reconnection with the true breach timestamp.
+
+#### FR-15: Guest follow-up
+A front office user is prompted to follow up with the guest after a Request is completed, and can record the outcome, including guest dissatisfaction that converts the Request into a Glitch.
+**Consequences (testable):** Follow-up is performed by front office staff through the Property's existing guest channel (typically a call to the Room) — JazzTicketing prompts and records it but does not contact the guest, per §5; follow-up prompting is configurable per Catalog Entry; recorded dissatisfaction creates a linked Glitch under FR-40 with the Request referenced; follow-up outcomes are reportable.
+
+#### FR-16: Repeat-request detection
+The system flags a new Request as a repeat when the same Location and Catalog Entry produced a Request within a configurable window on the same Stay. Realizes UJ-5.
+**Consequences (testable):** The flag is visible at creation to the front office user and on the dispatched Job; repeat Requests are counted separately in reporting; the window is Property-configurable.
+
+#### FR-17: Staff-raised Requests
+Any Staff Member can raise a Request from mobile against their current Location without front-office involvement. Realizes UJ-1.
+**Consequences (testable):** A staff-raised Request is indistinguishable in lifecycle from a front-office Request and carries its origin for reporting.
+
+#### FR-18: Open Request views
+Front office and department managers can see all open Requests for their scope, filtered by Department, status, SLA state, and Location, sorted by urgency.
+**Consequences (testable):** The view updates without a manual refresh within five seconds of a state change; breaching and breached Jobs are visually distinct; the view is exportable.
+
+### 4.3 Housekeeping Operations
+
+**Description:** Room Status as the shared truth between JazzTicketing and the PMS, boards built from it, and the attendant's day on mobile. Supervisors inspect, reassign, and see the floor. Turndown runs as a second pass with its own Credits. Realizes UJ-1, UJ-4.
+
+**Functional Requirements:**
+
+#### FR-19: Room Status model
+The system maintains Room Status for every Room on the occupancy and cleanliness axes, plus OOO and OOS states, and reflects PMS-originated changes without manual entry.
+**Consequences (testable):** Status changes from either side reconcile per FR-50; conflicting simultaneous changes resolve by the rule defined in FR-51 and are logged; OOO and OOS are mutually exclusive.
+
+#### FR-20: Room Assignment (board)
+A supervisor can generate and adjust Room Assignments for a shift, balanced by Credits, with departures prioritized by the arrivals the PMS reports. Realizes UJ-1, UJ-4.
+**Consequences (testable):** Generation completes for a 400-Room Property in under ten seconds; Credit values by Room type and clean type are Property-configurable; an unassigned Room is visible as unassigned rather than silently dropped.
+
+#### FR-21: Attendant room flow
+A Room Attendant can start, pause, and complete a Room from mobile, and record DND or refuse-service without completing it. Realizes UJ-1.
+**Consequences (testable):** Start and complete timestamps are recorded per Room per attendant; DND and refuse-service set a configured re-attempt reminder; a Room cannot be marked clean without being started, except by a supervisor override that is logged.
+
+#### FR-22: Raise a Fault from a Room
+A Room Attendant can raise a Fault from inside the Room card with a photo and short description, generating a reactive Work Order without leaving housekeeping flow. Realizes UJ-1.
+**Consequences (testable):** The Work Order carries the Room, the photo, and the reporting Staff Member; the attendant's Room flow is not blocked by the Work Order's lifecycle.
+
+#### FR-23: Board reassignment
+A supervisor can move Rooms between Room Assignments during a shift, and affected attendants see the change on their device within seconds. Realizes UJ-4.
+**Consequences (testable):** Reassigning a started Room requires confirmation and preserves start time, notes, and any raised Faults; the receiving attendant sees the originating attendant's note; Credits recalculate for both attendants.
+
+#### FR-24: Inspection
+A supervisor can inspect a completed Room against the Property's Inspection checklist and pass or reject it, with rejection returning the Room to the attendant's board flagged with notes and photos. Realizes UJ-1.
+**Consequences (testable):** Checklists are Property-configurable with scored or pass/fail items; a rejected Room re-enters the originating attendant's board ahead of unstarted Rooms; inspection outcomes are reportable by attendant and by supervisor.
+
+#### FR-25: Turndown
+A supervisor can generate a turndown pass as a separate Room Assignment with its own Credits and time window.
+**Consequences (testable):** Turndown assignments do not overwrite the day's cleaning record; a Room can carry both a completed clean and a completed turndown on the same date.
+
+#### FR-26: Linen, amenity, and supply requests
+A Room Attendant can request linen, amenities, or supplies from mobile, creating a Job routed to the configured Department.
+**Consequences (testable):** These are Catalog Entries and follow the Request lifecycle in §4.2; the attendant can continue working while the Job is open.
+
+#### FR-27: Housekeeping floor view
+A supervisor or Executive Housekeeper can see live Room Status across floors with attendant progress against median duration. Realizes UJ-4.
+**Consequences (testable):** The view distinguishes not started, in progress, DND, refused, clean awaiting inspection, and inspected; an attendant is flagged as behind when elapsed time on a started Room exceeds the Property's rolling median for that Room type and clean type by a configurable percentage (default 25%), with the flag computed server-side and the visual treatment left to UX; the view refreshes without manual action.
+
+#### FR-28: Departure priority
+The system orders departure Rooms on a board by the arrival demand the PMS reports for the day. Realizes UJ-1.
+**Consequences (testable):** Priority recomputes when arrivals change; a supervisor can pin a Room to the top of a board manually and that override survives recomputation.
+
+#### FR-29: Shift handover
+An attendant can end a shift with incomplete Rooms, and those Rooms return to the unassigned pool with their state and notes intact.
+**Consequences (testable):** Partially completed Rooms retain start time and raised Faults; the supervisor sees them as handover items rather than as new work.
+
+### 4.4 Engineering and Work Orders
+
+**Description:** Reactive Work Orders from Faults and preventive Work Orders from PM Schedules, both against an Asset registry that accumulates history. Rooms move in and out of service from here and the PMS follows. Parts consumption is recorded at the level a chief engineer will actually maintain. Realizes UJ-3, UJ-6.
+
+**Functional Requirements:**
+
+#### FR-30: Reactive Work Orders
+An engineer or supervisor can raise and work a Work Order against a Location or Asset, through the same lifecycle as a Request. Realizes UJ-3.
+**Consequences (testable):** Work Orders and Requests share lifecycle states, SLA behavior, and escalation; a Work Order can be raised from a Fault (FR-22), from the console, or from a guest Request that is reclassified.
+
+#### FR-31: Asset registry
+A property administrator can register Assets with a type, Location, identifier, and optional warranty and installation dates, and every Work Order against an Asset accrues to its history. Realizes UJ-3.
+**Consequences (testable):** An Asset's full Work Order history is visible from the Job on mobile; Assets can be bulk-imported; moving an Asset to a new Location preserves history.
+
+#### FR-32: PM Schedules
+A chief engineer can define PM Schedules that generate preventive Work Orders on calendar, runtime, or occupancy-based triggers.
+**Consequences (testable):** [ASSUMPTION] runtime and occupancy triggers in v1 are driven by data the PMS or manual entry supplies, not by IoT telemetry (out of scope per §5); a generated Work Order carries its originating PM Schedule; missed and overdue PM Work Orders are reportable.
+
+#### FR-33: Recurring-fault detection
+The system flags an Asset or Location that accumulates a configurable number of Work Orders within a configurable window. Realizes UJ-3, UJ-6.
+**Consequences (testable):** Default threshold is three Work Orders in ninety days, Property-configurable; flagged Assets appear on the Chief Engineer's and GM's views; the flag clears on a configured review action, not silently.
+
+#### FR-34: Out of Order and Out of Service
+An engineer or duty manager can place a Room OOO or OOS from a Work Order with a reason and expected return date, and return it to sale on completion. Realizes UJ-3.
+**Consequences (testable):** OOO/OOS is written back to the PMS per FR-52 and the write-back result is visible on the Job; a Room cannot be returned to sale while an OOO-linked Work Order is open, without an override that is logged; expected return dates that pass are surfaced to the chief engineer.
+
+#### FR-35: Parts and consumption
+An engineer can record parts consumed against a Work Order from a Property-maintained parts list.
+**Consequences (testable):** Parts consumption is reportable per Asset and per Work Order; v1 tracks consumption and on-hand count only — no purchasing, reorder, or supplier workflow (§5).
+
+#### FR-36: Guest-impacting fast path
+A Work Order raised against an occupied Room for a configured guest-impacting Catalog Entry (hot/cold, no hot water, no power, lock failure) receives the Property's priority SLA Target and escalation chain. Realizes UJ-3.
+**Consequences (testable):** The fast-path set is Property-configurable; these Work Orders are visually distinct in every queue; they cannot be assigned to an unavailable Staff Member without an explicit override.
+
+#### FR-37: Work Order closure quality
+An engineer must record a resolution and, where the Catalog Entry requires it, a root cause and a photo before closing a Work Order. Realizes UJ-3.
+**Consequences (testable):** Root-cause values come from a Property-configurable list, not free text alone; closure without required fields is refused; a Work Order closed as "recurring" links to the prior Work Orders it repeats.
+
+#### FR-38: Engineering queue and workload
+A chief engineer can see all open Work Orders for the Property by status, SLA state, Asset, and assignee, including preventive work due.
+**Consequences (testable):** Preventive and reactive work are distinguishable and separately filterable; overdue preventive work is surfaced rather than buried under reactive volume.
+
+#### FR-39: Public-area and back-of-house work
+Work Orders can be raised against non-Room Locations with the same lifecycle and reporting.
+**Consequences (testable):** Location hierarchy supports floors, public areas, outlets, and back-of-house spaces; reporting can separate guest-facing from back-of-house work.
+
+### 4.5 Incidents, Glitch Tracking, and Lost & Found
+
+**Description:** What happens when service fails. A Glitch records the failure against the Stay with cause and responsible Department; a Recovery records what was given and who approved it. Lost & Found runs its own chain of custody, which is a compliance matter as much as an operational one. Realizes UJ-5.
+
+**Functional Requirements:**
+
+#### FR-40: Log a Glitch
+A duty manager, front office user, or department manager can log a Glitch against a Stay or a Location with category, severity, responsible Department, and description. Realizes UJ-5.
+**Consequences (testable):** Categories and severities are Property-configurable with Tenant defaults; a Glitch can be logged without a Recovery; a Glitch against a Stay is visible on that Stay's timeline.
+
+#### FR-41: Link a Glitch to its causes
+A user logging a Glitch can link the Requests, Work Orders, and Room records that caused it. Realizes UJ-5.
+**Consequences (testable):** Linked Jobs are navigable from the Glitch and the Glitch is visible from each linked Job; linkage is reportable so Glitch volume can be attributed to Job types.
+
+#### FR-42: Record a Recovery
+A duty manager can record a Recovery against a Glitch with type, value, and currency. Realizes UJ-5.
+**Consequences (testable):** Recovery types are Property-configurable (comp, discount, points, upgrade, amenity, other); recorded value is reportable by Department, category, and period; v1 records the Recovery — it does not post to the PMS folio or any financial system (§5).
+
+#### FR-43: Recovery approval thresholds
+A Recovery whose value exceeds the Property's configured threshold for the user's role routes for approval before it is recorded as authorized. Realizes UJ-5.
+**Consequences (testable):** Thresholds are configurable per role per Property; the approver and decision timestamp are recorded; a pending approval appears on the approver's queue and escalates on the Property's configured interval.
+
+#### FR-44: Root cause and review
+A department manager can assign a root cause to a Glitch from a configurable list and mark it reviewed.
+**Consequences (testable):** Unreviewed Glitches older than a configurable age are surfaced to the GM; root-cause distribution is reportable by Department and period.
+
+#### FR-45: Guest history awareness
+A front office user opening a Stay sees prior Glitches and Recoveries for that guest within the Property, and — where the Tenant enables it — across the Tenant's Properties.
+**Consequences (testable):** Cross-Property visibility is a Tenant-level setting, off by default, and its state is recorded in the audit trail; the view respects the data governance rules in §11.
+
+#### FR-46: Record a Lost & Found Item
+Any Staff Member can record a Lost & Found Item from mobile with photo, Location found, date, finder, and category.
+**Consequences (testable):** An item record cannot be created without Location, finder, and date; a storage location and reference are assigned on acceptance into storage.
+
+#### FR-47: Chain of custody
+Every change of possession or state of a Lost & Found Item is recorded with actor and timestamp, through found → stored → matched → returned or disposed.
+**Consequences (testable):** Custody history is immutable and exportable; return requires recording the recipient and the release method; disposal requires a reason and, above a configurable value, an approver.
+
+#### FR-48: Match an enquiry to an item
+A front office user can search Lost & Found Items by date range, Location, and category to match a guest enquiry, and record the enquiry outcome.
+**Consequences (testable):** Search returns results within two seconds over a Property's twelve-month register; unmatched enquiries are retained and re-checked against later item records for a configurable period; retention and disposal timers per §11 are visible on each item.
+
+### 4.6 PMS and PBX Integration
+
+**Description:** The differentiating subsystem, and the one with the most external failure modes. Jazzware Adapters connect each Property's PMS and PBX to JazzTicketing. Room Status flows both ways, Stay context flows in, OOO/OOS flows out, and a guest call surfaces as a Request draft with the room and guest already resolved. The transport and topology are architecture's call; the behavior below is not. Realizes UJ-1, UJ-2, UJ-3.
+
+**Functional Requirements:**
+
+#### FR-49: Adapter registration and health
+A property administrator can see which Adapters are connected for their Property, their last successful exchange, and their current health.
+**Consequences (testable):** Health is visible without engineering access; a degraded or disconnected Adapter raises a notification to configured roles; health history is retained for troubleshooting.
+
+#### FR-50: Room Status synchronization
+Room Status changes propagate between the PMS and JazzTicketing in both directions within the Property's configured tolerance. Realizes UJ-1.
+**Consequences (testable):** [ASSUMPTION] target propagation is under thirty seconds end to end under normal conditions — confirm against what the installed PMS estate actually supports; every synchronization event is logged with direction, outcome, and latency; sustained failure surfaces per FR-49 rather than silently diverging.
+
+#### FR-51: Conflict resolution
+When the PMS and JazzTicketing hold different Room Status for the same Room, the system resolves by the configured authority rule and records the conflict.
+**Consequences (testable):** The default rule is PMS-authoritative for occupancy and JazzTicketing-authoritative for cleanliness, Property-configurable; every resolved conflict is logged and reportable; conflict volume above a threshold notifies the property administrator.
+
+#### FR-52: OOO/OOS write-back
+An OOO or OOS state set in JazzTicketing is written to the PMS, and the outcome is reflected on the originating Work Order. Realizes UJ-3.
+**Consequences (testable):** A failed write-back is retried on a bounded schedule and, on exhaustion, surfaces to the chief engineer and property administrator with the room still marked locally; success and failure are both visible on the Work Order.
+
+#### FR-53: Stay context ingestion
+The system ingests check-in, check-out, room move, and guest profile context for current Stays.
+**Consequences (testable):** A room move relocates open Jobs for that Stay to the new Room and records the move on each Job; check-out closes the guest-facing follow-up window per FR-15; guest data ingested is limited to the fields §11 permits.
+
+#### FR-54: Guest-call-to-Request
+A guest call from a Room surfaces to the receiving operator as a Request draft pre-resolved to that Room and Stay. Realizes UJ-2.
+**Consequences (testable):** The draft appears to the operator handling the call within two seconds of connection; when the caller cannot be resolved to a Room the operator gets an unresolved draft rather than a wrong one; discarded drafts are not retained as Requests.
+
+#### FR-55: Wake-up calls
+Wake-up call requests captured through the PBX are visible in JazzTicketing as scheduled items against the Stay, and failures to deliver raise a Job.
+**Consequences (testable):** [ASSUMPTION] scope confirmed as visibility and exception handling, not wake-up scheduling itself, which remains the PBX's function; a failed wake-up creates a Job on the configured Department with priority SLA.
+
+#### FR-56: Minibar and room-status phone posting
+Postings made by staff through room phones (minibar consumption, room-status codes) are reflected in JazzTicketing.
+**Consequences (testable):** A phone-posted room status is treated identically to an in-app status change for FR-50 and FR-51; minibar postings attach to the Stay; [ASSUMPTION] financial posting remains a PMS/PBX function and JazzTicketing records rather than posts.
+
+#### FR-57: Degraded-mode operation
+JazzTicketing remains fully operable for Job creation, dispatch, and closure while a Property's PMS or PBX Adapter is unavailable.
+**Consequences (testable):** Jobs created during an outage carry a marker that context was unavailable; Room Status changes made locally during an outage are queued and reconciled on recovery per FR-51; every surface that would normally show Stay or PMS-sourced context instead shows an explicit stale-context marker naming the time of the last successful exchange, and no interaction is blocked by its presence.
+
+### 4.7 Mobile Application Foundation
+
+**Description:** The surface most of the workforce touches, on Property-issued Shared Devices and personal handsets, in corridors with unreliable coverage, in several languages. Cross-cutting behaviors that every mobile feature depends on. Realizes UJ-1, UJ-3.
+
+**Functional Requirements:**
+
+#### FR-58: Offline action queueing
+A Staff Member can start, pause, complete, and annotate Jobs and Rooms while the device has no connectivity, and the actions apply when connectivity returns. Realizes UJ-1.
+**Consequences (testable):** Queued actions carry the timestamp of the action, not of the sync; the interface shows what is queued and unsynced; a queued action surviving a device restart is a requirement, not a best effort; sync conflicts resolve by the rule in FR-59 and are never silently discarded.
+
+#### FR-59: Sync conflict handling
+When a queued offline action conflicts with a server-side change, the system resolves it deterministically and makes the resolution visible.
+**Consequences (testable):** Resolution rules are documented per action type (e.g. a supervisor's reassignment beats a queued start; a completion is never lost, it becomes a completion on a reassigned Job); the affected Staff Member and supervisor can see that a conflict occurred and what won.
+
+#### FR-60: Push notification
+A Staff Member receives push notification of dispatch, escalation, and reassignment relevant to their role and Property.
+**Consequences (testable):** Notification routing respects the signed-in Staff Member on a Shared Device; notifications are suppressed for Jobs already accepted by someone else; a Staff Member can see in-app what they were notified about even if the push was missed.
+
+#### FR-61: Multi-language interface
+A Staff Member can use the mobile interface in their configured language. Realizes UJ-1.
+**Consequences (testable):** [ASSUMPTION] v1 ships English plus a launch set confirmed with the first design partners; language is a Staff Member attribute, applied at sign-in on a Shared Device; free-text content is not machine-translated in v1 and is shown as entered.
+
+#### FR-62: Photo capture and attachment
+A Staff Member can attach photos to Jobs, Faults, Inspections, Glitches, and Lost & Found Items from the device camera.
+**Consequences (testable):** Photos are compressed on device before upload; capture works offline and uploads with the queued action; attachment size and count limits are configured centrally and enforced.
+
+#### FR-63: Mobile Job queue
+A Staff Member sees their assigned and available Jobs ordered by SLA urgency, with the information needed to act without opening each one.
+**Consequences (testable):** Every action needed to accept, start, and complete a Job from the queue is reachable within the one-handed thumb zone on the baseline device (NFR-5), verified in usability testing with gloved and ungloved hands; SLA state is distinguishable without opening the Job, meeting NFR-6's non-colour requirement at arm's length in low light; the queue reflects a dispatch within five seconds when online.
+
+#### FR-64: Device and session hygiene
+The mobile application protects Property and guest data on Shared Devices.
+**Consequences (testable):** Guest names and Stay context are not retained on device after sign-out; local caches are encrypted at rest; a remote sign-out invalidates a device session at next contact.
+
+### 4.8 Notifications and Escalation Routing
+
+**Description:** How the system reaches people, on which channel, without becoming noise that staff learn to ignore. Shared by every feature that dispatches or escalates.
+
+**Functional Requirements:**
+
+#### FR-65: Notification routing rules
+A property administrator can configure, per Department and event type, which roles are notified and on which channels.
+**Consequences (testable):** Supported channels in v1 are push and in-app, with email for management-level events; [ASSUMPTION] SMS is configurable but off by default pending per-Property cost confirmation; rules are Property-scoped with Tenant defaults.
+
+#### FR-66: Escalation chain configuration
+A property administrator can define ordered Escalation chains by role, with an interval per step.
+**Consequences (testable):** A chain applies to both non-acceptance (FR-11) and Breach (FR-14) with separately configurable intervals; a chain that reaches its end holds at the final role and continues to remind rather than stopping silently.
+
+#### FR-67: Notification suppression
+The system suppresses notifications that are no longer actionable and coalesces bursts to the same recipient.
+**Consequences (testable):** A Job accepted before a notification is delivered does not notify other candidates; repeated escalations on the same Job to the same recipient coalesce within a configurable window; suppression never applies to Breach notifications to management roles.
+
+#### FR-68: Quiet hours and duty routing
+Notification routing respects Property-configured shift and quiet-hour rules so that off-shift staff are not paged for routine work.
+**Consequences (testable):** Guest-impacting fast-path Jobs (FR-36) override quiet hours; overrides are logged; a Property with no configuration routes to the Department default rather than to no one.
+
+### 4.9 Reporting and Dashboards
+
+**Description:** What managers and GMs look at, and the evidence a brand audit or an owner review needs. Operational views are live; analytical views are periodic. Realizes UJ-4, UJ-6.
+
+**Functional Requirements:**
+
+#### FR-69: Department operations dashboard
+A department manager sees live open load, SLA state distribution, breaches, and staff workload for their Department and Property. Realizes UJ-4.
+**Consequences (testable):** The dashboard is current within thirty seconds; it distinguishes breached, breaching, and within-target Jobs; it is scoped to the manager's Department unless their role spans more.
+
+#### FR-70: Property operations dashboard
+A GM or duty manager sees cross-Department state for the Property: open Jobs, breaches, Rooms not ready against arrivals, OOO/OOS count, open Glitches. Realizes UJ-6.
+**Consequences (testable):** Every figure is drillable to the underlying records; the dashboard names its own data freshness.
+
+#### FR-71: SLA and response reporting
+A manager can report on response and completion time and SLA compliance by Department, Catalog Entry, shift, and period, against the Property's recorded baseline. Realizes UJ-6.
+**Consequences (testable):** The pre-launch baseline captured at onboarding is stored per Property and shown alongside current figures; medians and percentiles are available, not only means; paused time is separable from active time.
+
+#### FR-72: Recurring-fault and Asset reporting
+A chief engineer or GM can report on Assets and Locations by Work Order frequency, cost of parts consumed, and OOO duration. Realizes UJ-3, UJ-6.
+**Consequences (testable):** Recurring-fault flags (FR-33) are reportable as a list with drill-down; OOO duration is reportable as revenue-relevant room-nights lost.
+
+#### FR-73: Glitch and Recovery reporting
+A GM can report Glitch volume, category, responsible Department, root cause, and Recovery value by period. Realizes UJ-5, UJ-6.
+**Consequences (testable):** Recovery value totals are reportable by currency without conversion in v1; Glitches linked to Jobs are attributable to Catalog Entries.
+
+#### FR-74: Adoption and data-quality reporting
+A GM sees line-staff mobile usage against roster and an explicit data-completeness indicator per Department. Realizes UJ-6.
+**Consequences (testable):** A Department below a configurable usage threshold is marked as having incomplete data wherever its figures appear; the indicator cannot be turned off from within reporting.
+
+#### FR-75: Export and evidence pack
+A manager can export any report and generate a brand-standard evidence pack for a date range. Realizes UJ-6.
+**Consequences (testable):** Exports are CSV and PDF; exports respect the requesting user's Property and Department scope; every export is recorded in the audit trail with actor, scope, and period; [ASSUMPTION] the evidence pack's required contents must be confirmed against the specific brand standards the target Properties are audited against.
+
+#### FR-76: Corporate cross-Property view
+A corporate user at a multi-Property Tenant can compare Properties on the same operational definitions.
+**Consequences (testable):** Comparison uses Tenant-level metric definitions, and a Property whose configuration diverges from them is marked as not comparable rather than silently normalized; no guest-identifying data appears in cross-Property views.
+
+## 5. Non-Goals (Explicit)
+
+- **We are not building a guest-facing product in v1.** No guest app, web portal, chatbot, or in-room tablet surface. The guest's channel is the hotel's existing one.
+- **We are not building an AI product in v1.** No automatic classification, duration prediction, predictive escalation, or natural-language intake. The data model is designed so these become possible later; nothing ships that depends on them.
+- **We are not becoming a PMS.** Reservations, rates, inventory, folio, and night audit stay where they are. JazzTicketing reads and writes the operational slice and nothing else.
+- **We are not becoming a financial system.** Recoveries and parts are recorded, never posted, approved for payment, or reconciled.
+- **We are not building labor management.** No rostering, scheduling, time and attendance, or payroll. Boards are built from a roster the Property supplies or enters, not from a scheduling engine.
+- **We are not building F&B, spa, or activity operations.** Those Departments receive Jobs; their own workflows are out.
+- **We are not building an IoT platform.** No sensor ingestion, BMS, door-lock, or energy-management integration in v1.
+- **We are not shipping on-premises.** One multi-tenant cloud deployment. A Property-side Adapter component is an architecture option, not a customer-managed application.
+- **We are not chasing incumbent feature parity.** Scope is judged against the four spines and the integration wedge, not against a competitor's grid.
+
+## 6. MVP Scope
+
+### 6.1 In Scope
+
+- The four operational spines: guest request dispatch (§4.2), housekeeping operations (§4.3), engineering and work orders (§4.4), and incidents, glitch tracking and Lost & Found (§4.5).
+- Multi-tenant foundation: Tenant → Property → Department → Staff Member hierarchy, role-based access, corporate SSO, Shared Device sign-in, Property-level configuration, audit trail (§4.1).
+- PMS and PBX integration through Jazzware Adapters: two-way Room Status, Stay context, OOO/OOS write-back, guest-call-to-Request, wake-up visibility, phone-posted status, and degraded-mode operation (§4.6).
+- Mobile application for line staff with offline queueing, push, photo capture, multi-language interface, and Shared Device hygiene (§4.7).
+- Notification and escalation routing configurable per Property and Department (§4.8).
+- Operational dashboards, SLA and recurring-fault reporting, Glitch and Recovery reporting, adoption/data-quality reporting, exports and the brand evidence pack (§4.9).
+- Onboarding capture of each Property's pre-launch baseline, without which SM-2 cannot be claimed.
+
+`[NOTE FOR PM]` **This scope is a v1 platform, not a minimum viable product, and the PRD does not yet say what a smaller first release contains.** Seventy-six FRs across nine feature groups cannot be judged as fundable until Open Question 4 (team and timeline) is answered. If the answer is anything short of a dedicated team for several releases, this section needs an explicit slicing: a first release that proves the thesis end to end at one Property — tenancy and Job core, the Adapter layer and Room Status sync, the mobile foundation, and the one spine that best demonstrates the integration claim — with the remaining spines sequenced behind it. Reporting FR-71 and FR-74 belong in the first release regardless, because SM-1, SM-2 and SM-3 cannot be measured without them. Decide this before the pitch; it is the question management will ask first.
+
+### 6.2 Out of Scope for MVP
+
+- Guest-facing surfaces of any kind — the differentiator is operational, and a guest surface doubles the design and support burden for v1. *Deferred to v2.*
+- AI triage, duration prediction, predictive escalation, and natural-language intake — they need the operational history v1 produces. *Deferred to v2/v3.* `[NOTE FOR PM]` This is the section most likely to be pulled forward by enthusiasm during the pitch; hold the line or move it deliberately with a scope trade, not as an addition.
+- F&B/POS, spa, and activity workflows. *v2 at the earliest.*
+- Procurement, purchasing, reorder points, and supplier management. *No committed release.*
+- Labor scheduling, time and attendance, payroll. *No committed release — likely an integration rather than a build.*
+- IoT/BMS, door locks, energy management. *v3 or an integration partnership.*
+- Financial posting of Recoveries to the folio. *v2, and dependent on FR-42's data proving accurate in practice.* `[NOTE FOR PM]` GMs will ask for this early.
+- Cross-Tenant benchmarking. *Not planned; raises data-governance questions we do not need in v1.*
+- On-premises deployment. *Not planned.*
+- Native tablet-optimized layouts beyond responsive behavior. *v2.*
+
+## 7. Cross-Cutting Non-Functional Requirements
+
+- **NFR-1 Availability.** The platform targets 99.9% monthly availability per Property, measured on Job creation and state transition. Planned maintenance occurs outside each Property's local peak windows (checkout 09:00–12:00, evening turndown 17:00–21:00) — a constraint that a global window cannot satisfy and architecture must design around.
+- **NFR-2 Property-side survivability.** A Property must remain operable during WAN loss for at least the duration of a shift, with degraded features clearly indicated. Where this requirement lands — client-side queueing alone or a Property-side component — is architecture's decision and the single most consequential one in this PRD.
+- **NFR-3 Latency.** Dispatch reaches an online recipient's device within five seconds at p95. Console list views load within two seconds at p95 for a 400-Room Property. Catalog search responds within 300ms at p95.
+- **NFR-4 Scale.** Design point: a Tenant of 200 Properties, a Property of 1,500 Rooms, 4,000 open and closed Jobs per Property per day at peak, and 500 concurrent mobile sessions per Property. [ASSUMPTION] — derived from category norms, to be replaced with figures from the Jazzware installed base.
+- **NFR-5 Mobile device support.** Property-issued and personal handsets, including devices several generations old, on intermittent Wi-Fi. Cold start to usable Job queue under four seconds on the baseline device class, which must be named before development starts.
+- **NFR-6 Accessibility.** WCAG 2.1 AA for the web console. Mobile meets platform accessibility guidelines, with the specific requirement that Job state is never conveyed by colour alone — SLA state must be legible to a colour-blind attendant in a dim corridor.
+- **NFR-7 Security.** Encryption in transit and at rest; least-privilege service credentials for Adapters; no shared administrative accounts; secrets never resident on Shared Devices; penetration test before first production Property.
+- **NFR-8 Observability.** Every Job state transition, notification delivery, Adapter exchange, and sync conflict is traceable end to end. A support engineer must be able to answer "why did this Job not reach this phone" from telemetry alone.
+- **NFR-9 Time correctness.** All SLA computation is server-side in UTC and presented in Property-local time, correct across DST transitions and across Properties in different zones within one Tenant.
+- **NFR-10 Localization.** Interface strings, date/time, and number formats are localizable; the data model does not assume a single language for free text.
+
+## 8. Operational Requirements
+
+- **OR-1 Support model.** 24/7 support for guest-impacting failures, with a defined severity ladder and response targets. Hotels operate continuously; a weekday support model is not viable and must be costed in the pitch.
+- **OR-2 RTO / RPO.** [ASSUMPTION] RTO 1 hour, RPO 15 minutes for operational data. Confirm against what management is willing to fund.
+- **OR-3 Onboarding.** A Property reaches first production Job within days of contract, not months. The onboarding runbook — Locations and Rooms import, Catalog and SLA configuration, roster load, Adapter configuration, baseline capture, staff training — is a v1 deliverable, not documentation written afterward.
+- **OR-4 Adapter operations.** Adapter health, alerting, and remediation are owned by the same Jazzware function that owns adapters today, with a defined escalation path from JazzTicketing support.
+- **OR-5 Release cadence.** Releases do not interrupt an operating Property; mobile clients must tolerate a server ahead of them by at least one release.
+
+## 9. Integration and Dependencies
+
+- **PMS.** The PMS platforms of the target Properties. [ASSUMPTION] Oracle OPERA is assumed present in some form; the actual estate must be enumerated before architecture, because it determines interface style, capability, and certification effort per platform. This is Open Question 1 and it blocks the architecture phase.
+- **PBX / telephony.** The Jazzware-supported PBX estate, which is known internally from adapter status tracking and should be attached to this PRD rather than re-derived.
+- **Identity provider.** Per-Tenant SSO for corporate users.
+- **Push notification services.** Platform push for mobile; deliverability on Property Wi-Fi with restrictive egress is a known risk and must be validated at the first design partner.
+- **Certification.** [ASSUMPTION] Some PMS vendors and hotel brands require vendor certification or approval before production connection. Lead time and cost are unquantified and could gate go-live.
+
+## 10. Stakeholders and Approvals
+
+- **Product decision and funding:** Jazzware management, on the strength of the brief and this PRD.
+- **Engineering ownership:** Tanim's group, including the adapter function whose scope this extends.
+- **Design partner:** at least one Property from the existing base, named before development starts (Open Question 2).
+- **Approval to proceed to architecture:** resolution of Open Questions 1 and 3.
+
+## 11. Data Governance and Compliance
+
+- **DG-1 Guest data minimization.** JazzTicketing stores the smallest guest dataset that makes the operational context useful: name, Room, Stay dates, VIP/loyalty flag, and language. No payment data, no identity-document data, no marketing profile.
+- **DG-2 Retention.** Guest-linked records (Requests carrying Stay context, Glitches, Recoveries, Lost & Found Items) have Tenant-configurable retention within a platform maximum, after which guest identifiers are removed while the operational record survives in de-identified form.
+- **DG-3 Right to erasure.** A guest erasure request is executable per Property and per Stay, removing guest identifiers while preserving de-identified operational history and the audit trail.
+- **DG-4 Residency.** [ASSUMPTION] EU Property data resides in the EU. Confirm target markets before architecture — this decides whether the platform is single-region or multi-region on day one, and retrofitting it is expensive.
+- **DG-5 Staff data.** Staff performance data (durations, inspection outcomes, adoption) is personal data in several jurisdictions and may be subject to works-council or union constraints. Reporting must support aggregate-only views where individual attribution is not permitted. `[NOTE FOR PM]` This is easy to miss and hard to retrofit into reporting.
+- **DG-6 Accessibility compliance.** WCAG 2.1 AA per NFR-6, evidenced before first production Property.
+- **DG-7 Out of scope.** PCI-DSS scope is avoided by design: no cardholder data enters the platform, and Recovery values are amounts, not transactions.
+
+## 12. Rollout and Change Management
+
+- **RO-1 Design-partner phase.** Two Properties from the existing Jazzware base, chosen for contrasting shape (one large, one small; ideally one multi-Property Tenant), running all four spines rather than a subset — a partial deployment will not surface the integration and adoption risks that matter.
+- **RO-2 Baseline first.** Each Property's pre-launch response and SLA baseline is captured before go-live. Without it, none of the improvement metrics in §13 can be claimed.
+- **RO-3 Staff enablement.** Line-staff training measured in minutes, not hours, and delivered in the languages of FR-61. If a room attendant needs a training session to use the app, the app is wrong.
+- **RO-4 Cutover.** Properties run parallel with existing practice for a defined period, with a named rollback position.
+- **RO-5 Adoption watch.** Mobile adoption (FR-74) is reviewed weekly during the design-partner phase; a Department below threshold triggers intervention, not a report.
+
+## 13. Success Metrics
+
+**Primary**
+
+- **SM-1: Time to first production Job.** Days from contract signature to the first Job created at a new Property; target under ten working days. Validates FR-5, FR-49, OR-3 — and the brief's central claim that our integration position converts into deployment speed.
+- **SM-2: SLA compliance improvement.** Percentage of Jobs closed within SLA Target, per Property, against that Property's own pre-launch baseline; target a measurable improvement by day 90. Validates FR-12, FR-14, FR-71.
+- **SM-3: Line-staff mobile adoption.** Daily active line staff as a percentage of rostered line staff; target above 80% by day 30 at a live Property. Validates FR-4, FR-58, FR-61, FR-63, FR-74.
+
+**Secondary**
+
+- **SM-4: Median response time by Department**, tracked against baseline. Validates FR-9, FR-10, FR-63.
+- **SM-5: Recurring faults surfaced and resolved** — Assets flagged under FR-33 that receive a review action within 30 days. Validates FR-31, FR-33, FR-72.
+- **SM-6: Glitch capture rate** — Glitches logged per 100 occupied room-nights, expected to *rise* on introduction as capture improves. Validates FR-40, FR-41.
+- **SM-7: Design-partner retention** — Properties still live and paying at 12 months. [ASSUMPTION] 8–12 Properties live in year one, at least two under a multi-Property Tenant.
+
+**Counter-metrics (do not optimize)**
+
+- **SM-C1: Requests logged per occupied room.** A *rise* early is success (capture improving), not failure. Counterbalances SM-4 — driving response time down by discouraging logging is the failure mode this catches.
+- **SM-C2: Median Job closure time versus rejected-Inspection rate and repeat-Request rate.** Fast closure that produces rework is not speed. Counterbalances SM-2 and SM-4.
+- **SM-C3: Notifications delivered per Staff Member per shift.** Escalation that pages everyone works until staff stop looking. Counterbalances SM-2; watched alongside FR-67.
+- **SM-C4: Configuration burden at onboarding.** Hours of configuration per Property. Counterbalances SM-1 — hitting the speed target by shifting the work onto the customer is not a win.
+
+## 14. Open Questions
+
+1. **Which PMS platforms does the target Property estate actually run, and in what versions and interface styles?** Blocks architecture: it determines interface capability, certification effort, and whether FR-50's propagation target is achievable. *Owner: Tanim. Needed before the architecture phase.*
+2. **Which Property is the first design partner?** Blocks RO-1 and the baseline capture in RO-2. *Owner: Tanim / Jazzware management.*
+3. **Does an existing Jazzware commercial relationship with an incumbent (Knowcross work is on record) constrain this?** Blocks the pitch, not the build, but it will be asked in the room. *Owner: Tanim.*
+4. **What team and timeline is the pitch assuming** — existing team, carve-out, or new headcount? Determines whether the §6.1 scope is one release or three.
+5. **Commercial model** — per Room, per Property, per user, or bundled into existing Jazzware contracts? Affects FR-1 tenancy shape and the corporate views in FR-76.
+6. **Which brand standards do target Properties get audited against?** Determines FR-75's evidence pack contents.
+7. **Which languages ship in v1** (FR-61), and who supplies and maintains the translations?
+8. **What is the baseline device class** for NFR-5, and does the design-partner Property issue devices or expect BYOD?
+9. **Which markets and therefore which data residency** obligations apply (DG-4)? Single-region or multi-region at launch is an expensive decision to defer.
+10. **Are there works-council or union constraints** on individual staff performance data at target Properties (DG-5)?
+
+## 15. Assumptions Index
+
+Every `[ASSUMPTION]` in this document, for explicit confirmation:
+
+1. §4.2 FR-9 — v1 routing is rule-based (Department + role + open load), not skill-graph or predictive.
+2. §4.4 FR-32 — PM Schedule runtime/occupancy triggers are fed by PMS or manual data, not IoT telemetry.
+3. §4.6 FR-50 — sub-30-second Room Status propagation is achievable against the installed PMS estate.
+4. §4.6 FR-55 — wake-up scope is visibility and exception handling, not scheduling.
+5. §4.6 FR-56 — financial posting stays a PMS/PBX function; JazzTicketing records rather than posts.
+6. §4.7 FR-61 — v1 ships English plus a launch language set to be confirmed with design partners.
+7. §4.8 FR-65 — SMS is configurable but off by default pending per-Property cost confirmation.
+8. §4.9 FR-75 — brand evidence-pack contents are unconfirmed pending Open Question 6.
+9. §7 NFR-4 — scale design points are category norms, not measured figures from the Jazzware base.
+10. §8 OR-2 — RTO 1 hour / RPO 15 minutes is proposed, not agreed.
+11. §9 — Oracle OPERA presence in the estate, and the existence of vendor/brand certification gates.
+12. §11 DG-4 — EU data residency for EU Properties; target markets unconfirmed.
+13. §13 SM-7 — 8–12 Properties live in year one, carried forward from the brief and still unvalidated.
+14. **Whole document** — all competitor positioning inherited from the brief remains unvalidated; web research was unavailable when both documents were written.

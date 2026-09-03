@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jazzware.com/jazzticketing/contracts/events/fixture-note-recorded.json",
+  "title": "FixtureNoteRecorded",
+  "description": "ISOLATION FIXTURE event. Past tense, domain-first. Carries tenant_id and property_id like every event (AD-3), and both clocks (AD-2).",
+  "type": "object",
+  "required": [
+    "eventId",
+    "type",
+    "tenantId",
+    "propertyId",
+    "occurredAt",
+    "recordedAt",
+    "payload"
+  ],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "description": "ULID"
+    },
+    "type": {
+      "const": "FixtureNoteRecorded"
+    },
+    "tenantId": {
+      "type": "string"
+    },
+    "propertyId": {
+      "type": "string"
+    },
+    "staffMemberId": {
+      "type": "string"
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "domain clock (AD-2)"
+    },
+    "recordedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "system clock (AD-2)"
+    },
+    "payload": {
+      "type": "object",
+      "required": [
+        "noteId",
+        "text"
+      ],
+      "properties": {
+        "noteId": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

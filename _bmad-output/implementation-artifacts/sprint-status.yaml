@@ -1,0 +1,133 @@
+# Sprint status - JazzTicketing
+# Generated 2026-09-02 from _bmad-output/planning-artifacts/epics.md (status: final).
+# Story keys match the file names in _bmad-output/implementation-artifacts/.
+#
+# STATUS DEFINITIONS
+#   backlog       - in epics.md, no story file created yet
+#   ready-for-dev - story file created with full dev context
+#   in-progress   - dev-story running
+#   review        - awaiting code-review
+#   done          - reviewed and accepted
+
+last_updated: 2026-09-02
+epics_source: _bmad-output/planning-artifacts/epics.md
+total_stories: 87
+
+development_status:
+
+  # Epic 1
+  epic-1: in-progress
+  1-0-repository-cell-and-gates: ready-for-dev
+  1-1-provision-tenant: ready-for-dev
+  1-2-create-property-under-tenant: ready-for-dev
+  1-3-invite-staff-member-assign-roles-per: ready-for-dev
+  1-4-define-duplicate-custom-roles-with-guards: ready-for-dev
+  1-5-connect-tenant-identity-provider: ready-for-dev
+  1-6-manage-tenant-defaults-see-blast-radius: ready-for-dev
+  1-7-configure-departments-locations-rooms: ready-for-dev
+  1-8-configure-catalog-entries-sla-targets: ready-for-dev
+  1-9-configure-pause-conditions-credits-escalation-chains: ready-for-dev
+  1-10-import-staff-roster-with-explicit-column: ready-for-dev
+  1-11-read-export-audit-trail: ready-for-dev
+
+  # Epic 2
+  epic-2: backlog
+  2-1-room-status-two-axes: ready-for-dev
+  2-2-connect-property-jazz-core-see-health: ready-for-dev
+  2-3-adapt-interface-property-s-jazz-core: ready-for-dev
+  2-4-tolerate-jazz-core-contract-moves: ready-for-dev
+  2-5-ingest-master-data-stay-context: ready-for-dev
+  2-6-synchronise-room-status-both-directions: ready-for-dev
+  2-7-resolve-room-status-conflict-declared-authority: ready-for-dev
+  2-8-submit-ooo-oos-jazz-core-show: ready-for-dev
+  2-9-reflect-phone-posted-status-minibar-events: ready-for-dev
+  2-10-report-room-status-discrepancy: ready-for-dev
+  2-11-guest-call-becomes-pre-resolved-request: ready-for-dev
+  2-12-undelivered-wake-up-call-raises-job: ready-for-dev
+  2-13-keep-working-while-jazz-core-unavailable: ready-for-dev
+
+  # Epic 3
+  epic-3: backlog
+  3-1-create-request-against-location-catalog-entry: ready-for-dev
+  3-2-move-request-through-lifecycle: ready-for-dev
+  3-3-show-stay-guest-context-request: ready-for-dev
+  3-4-run-sla-clock-fold: ready-for-dev
+  3-5-route-request-candidates-let-supervisor-override: ready-for-dev
+  3-6-escalate-request-nobody-accepted: ready-for-dev
+  3-7-pause-sla-clock-real-reason: ready-for-dev
+  3-8-escalate-breach-up-chain: ready-for-dev
+  3-9-raise-request-handset: ready-for-dev
+  3-10-see-every-open-request-scope: ready-for-dev
+  3-11-fast-path-guest-impacting-fault: ready-for-dev
+
+  # Epic 4
+  epic-4: backlog
+  4-1-sign-shared-device: ready-for-dev
+  4-2-see-work-ordered-urgency: ready-for-dev
+  4-3-work-with-no-signal: ready-for-dev
+  4-4-see-what-happened-when-sync-conflicted: ready-for-dev
+  4-5-attach-photo-offline: ready-for-dev
+  4-6-use-handset-language-including-arabic: ready-for-dev
+  4-7-told-about-work-without-watching-screen: ready-for-dev
+  4-8-leave-nothing-behind-shared-handset: ready-for-dev
+
+  # Epic 5
+  epic-5: backlog
+  5-1-configure-who-notified-what-which-channel: ready-for-dev
+  5-2-configure-escalation-chains-with-interval-per: ready-for-dev
+  5-3-suppress-what-no-longer-worth-sending: ready-for-dev
+  5-4-respect-quiet-hours-without-burying-emergency: ready-for-dev
+
+  # Epic 6
+  epic-6: backlog
+  6-1-see-department-s-live-state: ready-for-dev
+  6-2-report-sla-against-property-s-baseline: ready-for-dev
+  6-3-show-whether-data-can-trusted: ready-for-dev
+  6-4-prompt-record-guest-follow-up: ready-for-dev
+  6-5-flag-repeat-request: ready-for-dev
+
+  # Epic 7
+  epic-7: backlog
+  7-1-generate-shift-board-balanced-credits: ready-for-dev
+  7-2-order-departures-arrivals-need-them: ready-for-dev
+  7-3-work-room-handset: ready-for-dev
+  7-4-raise-fault-without-leaving-room-card: ready-for-dev
+  7-5-move-rooms-between-attendants-mid-shift: ready-for-dev
+  7-6-inspect-room-reject-back-with-evidence: ready-for-dev
+  7-7-run-turndown-pass: ready-for-dev
+  7-8-request-linen-amenities-supplies-floor: ready-for-dev
+  7-9-see-floor-live: ready-for-dev
+  7-10-hand-over-incomplete-rooms-end-shift: ready-for-dev
+  7-11-define-floor-layout-view-rooms: ready-for-dev
+
+  # Epic 8
+  epic-8: backlog
+  8-1-raise-work-reactive-work-order: ready-for-dev
+  8-2-register-assets-accrue-history: ready-for-dev
+  8-3-enforce-closure-quality: ready-for-dev
+  8-4-record-parts-consumed: ready-for-dev
+  8-5-take-room-out-service-work-order: ready-for-dev
+  8-6-generate-preventive-work-schedule: ready-for-dev
+  8-7-flag-something-keeps-breaking: ready-for-dev
+  8-8-see-whole-engineering-queue: ready-for-dev
+  8-9-work-public-areas-back-house: ready-for-dev
+  8-10-report-assets-parts-rooms-lost-repair: ready-for-dev
+
+  # Epic 9
+  epic-9: backlog
+  9-1-log-glitch: ready-for-dev
+  9-2-link-glitch-what-caused: ready-for-dev
+  9-3-record-recovery: ready-for-dev
+  9-4-route-large-recovery-approval: ready-for-dev
+  9-5-assign-root-cause-close-loop: ready-for-dev
+  9-6-see-guest-s-history-when-permitted: ready-for-dev
+  9-7-record-found-item: ready-for-dev
+  9-8-keep-chain-custody: ready-for-dev
+  9-9-match-enquiry-item: ready-for-dev
+
+  # Epic 10
+  epic-10: backlog
+  10-1-see-whole-property-once: ready-for-dev
+  10-2-report-glitches-what-they-cost: ready-for-dev
+  10-3-export-report-generate-evidence-pack: ready-for-dev
+  10-4-compare-properties-same-definitions: ready-for-dev

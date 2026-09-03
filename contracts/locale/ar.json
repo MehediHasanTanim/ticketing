@@ -1,0 +1,9 @@
+{
+  "error.unauthenticated": "سجل الدخول للمتابعة.",
+  "error.forbidden": "لا تملك صلاحية الوصول.",
+  "error.not_found": "غير موجود.",
+  "error.validation_failed": "تحقق من الحقول المميزة.",
+  "error.upstream_unavailable": "خدمة Jazz Core غير متوفرة. تم حفظ عملك.",
+  "health.ok": "سليم",
+  "health.degraded": "متدهور"
+}

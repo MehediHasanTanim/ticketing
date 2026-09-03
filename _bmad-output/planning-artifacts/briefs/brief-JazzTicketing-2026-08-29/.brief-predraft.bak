@@ -1,0 +1,117 @@
+---
+title: "Product Brief: JazzTicketing — Hospitality Service Optimization Platform"
+status: draft
+created: 2026-08-29
+updated: 2026-08-29
+---
+
+# Product Brief: JazzTicketing
+
+**Purpose of this document:** internal pitch at Jazzware — the case for building a hospitality service-optimization platform as a Jazzware product, and the scope we would commit to for v1.
+
+---
+
+## Executive Summary
+
+Hotels run on requests. A guest calls for towels, a shower stops draining, a housekeeper finds a broken lamp, a front-desk agent logs a complaint at checkout. Every one of these is a ticket with a clock on it, and the properties that close them fastest score highest on guest satisfaction. The category leaders — HotSOS, Knowcross/HubOS, Quore — exist because spreadsheets, radios, and WhatsApp groups do not survive a 400-room property on a full house night.
+
+JazzTicketing is a multi-tenant cloud platform that runs the four operational spines of a hotel — guest request dispatch, housekeeping, engineering work orders, and incident/glitch recovery — on a web console for managers and a mobile app for the people on the floor. It is not a new category. It is the same category, entered from a position no incumbent holds: Jazzware already sits on the property's telephony and PMS layer, and already ships and supports the adapters that the incumbents pay integrators to build.
+
+Why now, and why us: the incumbents' integration story is their soft flank. Guest-call-to-ticket, room status sync, wake-up calls, and minibar posting arrive at those platforms through brittle middleware that someone else owns. For Jazzware they are a first-party concern. That turns a hard technical differentiator into an installed-base motion — we can land JazzTicketing inside hotels that already run our systems, where the integration is not a project but a configuration.
+
+## The Problem
+
+On a busy night, a 300-room property generates hundreds of service events across housekeeping, engineering, F&B, and the front desk. Today, at properties without a dedicated platform — and at plenty that have one — those events are coordinated by phone calls, radio chatter, WhatsApp groups, and a paper logbook at the desk:
+
+- **Nothing has a clock.** A guest request accepted at 21:40 has no owner and no deadline. The duty manager learns it was never closed when the guest complains at checkout.
+- **Context dies in transit.** The front desk knows the room, the guest's history, and the tone of the call. The runner gets "1204, towels."
+- **Work is invisible until it is a complaint.** Managers cannot see open load by department, so they cannot rebalance staff mid-shift, and they cannot prove SLA performance to brand auditors afterward.
+- **Recurring faults are never seen as recurring.** The same AC unit is repaired five times in a quarter because no one tied the five work orders to one asset.
+- **Recovery is ad hoc.** Compensation gets given, but the glitch, its root cause, and its cost are not logged anywhere a GM can review.
+
+For properties that *have* bought an incumbent platform, the pain shifts rather than disappears: [ASSUMPTION] integrations are quoted as professional-services projects and take months; mobile apps are treated as a companion to the desktop product rather than the primary surface for line staff; and pricing puts the platform out of reach for the mid-scale and independent properties that need the discipline most.
+
+## The Solution
+
+One platform, two surfaces, four spines.
+
+**Mobile app — the floor.** Room attendants, engineers, runners, and supervisors live here. Receive a dispatched job, accept it, work it, close it with a photo, all in a few taps and in the staff member's own language. Tolerant of dead Wi-Fi in stairwells and back-of-house corridors — queue actions offline, sync when the signal returns.
+
+**Web console — the desk and the office.** Front desk and telephone operators log and track guest requests; department managers see live open load, SLA clocks, and escalations; GMs and above see trends, recurring faults, glitch cost, and brand-standard evidence.
+
+**The four spines of v1:**
+
+1. **Guest request dispatch** — capture from any channel, route by department and skill, SLA clock with automatic escalation, guest follow-up.
+2. **Housekeeping operations** — room status, board assignment and credits, inspections, turndown, DND and refuse-service handling, live room-status sync with the PMS.
+3. **Engineering and work orders** — reactive work orders plus preventive maintenance schedules, an asset registry that accumulates fault history, parts and rooms out of order.
+4. **Incidents, lost & found, and glitch tracking** — guest-recovery workflows, compensation logging, root-cause coding, and a lost & found register with chain of custody.
+
+Underneath all four: a single tenant model where a brand or management company sees across its properties, and a property sees only itself.
+
+## What Makes This Different
+
+**The integration layer is ours, not a vendor's.** Jazzware already operates the PBX/PMS adapter surface at these properties. Guest calls become tickets natively, room status flows both ways without a middleware hop, and wake-up calls, minibar posts, and room-move events are first-class inputs rather than after-market connectors. For an incumbent this is an integration project; for us it is configuration. This is the wedge, and it is a real one — but it is a **distribution and cost-of-integration advantage, not a technical moat**. Any competitor can build the same adapters; they just have no reason to build them for our installed base first.
+
+**We start inside an installed base.** We do not need to win a competitive bake-off to get the first ten properties. We need to convert hotels that already trust Jazzware operationally and already have the hard part — the property-side plumbing — in place.
+
+**Mobile is the product, not a companion.** [ASSUMPTION] The incumbents' weakest surface is the one line staff actually hold. We design the housekeeper's and engineer's day first and let the web console follow from it.
+
+**What we do not claim:** we are not first, not cheapest by definition, and not more feature-complete than platforms with a decade of accumulated scope. Our advantage is a shorter path to value inside a base we already serve.
+
+## Who This Serves
+
+**Room attendant / engineer / runner (mobile, highest volume).** Wants their next job, the room, and what is wrong with it — nothing else. Success is a shift where they never have to call the desk to ask what is next.
+
+**Front desk agent and telephone operator (web).** Fields the guest, needs the request logged in seconds without leaving the call. Success is never having to say "let me check on that" twice.
+
+**Department manager — Executive Housekeeper, Chief Engineer, Duty Manager (both).** Owns the clock. Wants live open load, who is overloaded, what is about to breach. Success is rebalancing a shift before it goes wrong instead of explaining it afterward.
+
+**GM / Director of Operations / brand quality (web).** Wants trends, recurring faults, glitch cost, and evidence for brand audits. Success is walking into an owner's review with numbers.
+
+**Buyer, for the pitch:** at existing Jazzware accounts, the GM or Director of Operations, with IT as approver — and the sale is materially easier because IT already knows us.
+
+## Success Criteria
+
+**Business (first 12 months post-launch):**
+
+- [ASSUMPTION] 8–12 design-partner properties live from the existing Jazzware base, at least two of them multi-property groups.
+- Time from contract to first production ticket measured in **days, not months** — the integration advantage is only real if it shows up here.
+- Attach rate into the installed base as the primary commercial signal; net-new logos are a v2 concern.
+
+**Product / user:**
+
+- Average response time and SLA compliance improve measurably against each property's own pre-launch baseline (captured during onboarding — no baseline, no claim).
+- Daily active use by line staff on mobile above 80% of rostered staff; if room attendants are not opening the app, nothing else matters.
+- Requests logged per occupied room *rises* early (capture improving), then response time falls — expect and explain that curve to stakeholders.
+- Recurring-fault detection: assets with 3+ work orders in 90 days surfaced automatically.
+
+**Explicitly not a success metric for v1:** feature parity with HotSOS or Knowcross.
+
+## Scope
+
+**In for v1:**
+
+- The four spines above, on web and mobile.
+- Multi-tenant cloud SaaS: brand → property → department → user hierarchy, with per-property data isolation.
+- PMS and PBX integration through the Jazzware adapter layer: room status two-way, guest profile and stay context, guest-call-to-ticket, room moves, checkout events.
+- SLA rules, escalation chains, and notification routing, configurable per property and department.
+- Core operational reporting for managers and a GM-level dashboard.
+- Staff mobile app with offline queueing, push notification, photo attachment, and multi-language UI.
+
+**Explicitly out of v1:**
+
+- Guest-facing app or guest self-service portal — guests reach us through the channels the hotel already runs.
+- AI triage, duration prediction, and predictive escalation — designed for, not shipped in v1.
+- F&B/POS, spa, and activity-booking workflows.
+- Procurement, inventory depth beyond parts-on-hand, and capital project management.
+- Labor management, scheduling, and payroll.
+- IoT/BMS sensor ingestion, door-lock and energy-management integrations.
+- On-prem deployment.
+
+**Open at the architecture stage:** the on-property connectivity model for PMS/PBX (cloud-direct vs. lightweight on-property agent), tenancy isolation strategy, and the web/mobile stack — all deliberately deferred to Winston with trade-offs written up as ADRs.
+
+## Vision
+
+In two to three years, JazzTicketing is the operational record of the properties Jazzware serves — every request, every fault, every recovery, on one timeline per room and per asset. That record is what makes the next layer worth building: triage that classifies and routes a request the moment it is spoken, duration estimates drawn from this property's own history, maintenance scheduled from fault patterns rather than calendars, and staffing forecasts from tomorrow's arrivals.
+
+The longer-term prize is that the integration wedge stops being a wedge and becomes the product: a hotel operations layer that sits across telephony, PMS, and the floor, and that a management company can run across a whole portfolio from one console.

@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jazzware.com/jazzticketing/contracts/errors/envelope.json",
+  "title": "ErrorEnvelope",
+  "description": "One envelope everywhere. Stable machine code, a localisable message key, and a retryable flag. No stringly-typed errors across a boundary.",
+  "type": "object",
+  "required": [
+    "code",
+    "messageKey",
+    "retryable"
+  ],
+  "properties": {
+    "code": {
+      "type": "string",
+      "enum": [
+        "unauthenticated",
+        "forbidden",
+        "not_found",
+        "validation_failed",
+        "conflict",
+        "upstream_unavailable",
+        "internal"
+      ]
+    },
+    "messageKey": {
+      "type": "string"
+    },
+    "retryable": {
+      "type": "boolean"
+    },
+    "details": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": false
+}

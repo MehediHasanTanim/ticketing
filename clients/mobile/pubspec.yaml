@@ -1,0 +1,13 @@
+name: jazzticketing
+description: JazzTicketing handset - Flutter/Dart client (ARCHITECTURE-SPINE.md revision 2026-09-02b).
+publish_to: none
+version: 0.1.0
+
+environment:
+  # [UNVERIFIED] Story 1.0 AC-7: the Dart SDK could not be downloaded in the
+  # build environment (storage.googleapis.com returns 403), so this constraint
+  # comes from the spine's proposal and MUST be confirmed before it is trusted.
+  sdk: ">=3.0.0 <4.0.0"
+
+dev_dependencies:
+  test: any

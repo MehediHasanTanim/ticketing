@@ -1,0 +1,82 @@
+name: ci
+
+# Story 1.0 / AC-6: the three gates plus the boundary lint and the smoke test.
+# Every job here can fail the build on its own. scripts/negative-controls.sh
+# proves each one can go red - a gate that has never failed is not known to work.
+
+on:
+  push: { branches: [main] }
+  pull_request:
+
+env:
+  CELL_NAME: ci-eu-west-1
+  DATABASE_URL_ADMIN: postgres://postgres:postgres@127.0.0.1:5432/jazzticketing
+  DATABASE_URL_APP: postgres://jt_app:jt_app_local_only@127.0.0.1:5432/jazzticketing
+  REDIS_URL: redis://127.0.0.1:6379
+  FIXTURE_AUTH: "1"
+
+jobs:
+  build-and-boundaries:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run build
+      - name: GATE inward dependencies only (AC-1)
+        run: npm run gate:boundaries
+
+  codegen-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - name: GATE contracts are the schema of record (AC-2)
+        run: npm run gate:codegen-drift
+
+  sla-fixtures:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      # AD-14 requires BOTH languages. Without Dart this job is RED, by design.
+      - uses: dart-lang/setup-dart@v1
+        with: { sdk: stable }
+      - run: npm ci
+      - name: GATE one SLA fold, two languages, same vectors (AC-3)
+        run: npm run gate:sla-fixtures
+
+  isolation-and-cell:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: jazzticketing }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run build
+      - name: migrations applied from source (AC-5)
+        run: npm run migrate
+      - name: GATE cross-tenant isolation (AC-4)
+        run: npm run gate:isolation
+      - name: GATE control plane holds no guest data (AC-5)
+        run: npm run gate:control-plane
+      - name: smoke - the cell actually runs (AC-5)
+        run: npm run smoke
+      - name: unit tests
+        run: npm run test:unit

@@ -1,0 +1,169 @@
+openapi: 3.1.0
+info:
+  title: JazzTicketing API
+  version: 0.1.0
+  description: >-
+    Story 1.0 surface only. Commands are POSTs returning the accepted event;
+    reads are projections. Every request resolves to exactly one Tenant and Property.
+servers:
+  - url: /v1
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Cell health - API, event store, cache reachability
+      responses:
+        "200":
+          description: health snapshot
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+  /commands/record-fixture-note:
+    post:
+      operationId: recordFixtureNote
+      summary: >-
+        ISOLATION FIXTURE ONLY. Not a domain aggregate. Story 1.1 brings Tenant,
+        Story 3.1 brings Job. This exists so the cross-tenant isolation gate has a
+        real resource to attack through every public interface.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecordFixtureNote" }
+      responses:
+        "202":
+          description: the accepted event
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AcceptedEvent" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /fixture-notes:
+    get:
+      operationId: listFixtureNotes
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: projection page
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/FixtureNote" }
+  /fixture-notes/{id}:
+    get:
+      operationId: getFixtureNote
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: one note
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FixtureNote" }
+        "404": { $ref: "#/components/responses/Error" }
+  /fixture-notes/export:
+    get:
+      operationId: exportFixtureNotes
+      responses:
+        "200":
+          description: CSV within the caller's scope
+          content:
+            text/csv:
+              schema: { type: string }
+  /sla/preview:
+    post:
+      operationId: previewSla
+      summary: Evaluate the one SLA fold over a supplied event sequence.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SlaPreviewRequest" }
+      responses:
+        "200":
+          description: fold output
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SlaSnapshot" }
+components:
+  responses:
+    Error:
+      description: the one error envelope
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+  schemas:
+    Health:
+      type: object
+      required: [status, api, eventStore, cache, cell]
+      properties:
+        status: { type: string, enum: [ok, degraded] }
+        api: { type: string, enum: [ok] }
+        eventStore: { type: string, enum: [ok, unreachable] }
+        cache: { type: string, enum: [ok, unreachable] }
+        cell: { type: string }
+    ErrorEnvelope:
+      type: object
+      required: [code, messageKey, retryable]
+      properties:
+        code: { type: string }
+        messageKey: { type: string }
+        retryable: { type: boolean }
+        details: { type: object, additionalProperties: true }
+    RecordFixtureNote:
+      type: object
+      required: [text]
+      properties:
+        text: { type: string, maxLength: 280 }
+        clientKey: { type: string, description: idempotency key (AD-7) }
+    AcceptedEvent:
+      type: object
+      required: [eventId, type, occurredAt, recordedAt, tenantId, propertyId]
+      properties:
+        eventId: { type: string }
+        type: { type: string }
+        occurredAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time }
+        tenantId: { type: string }
+        propertyId: { type: string }
+    FixtureNote:
+      type: object
+      required: [id, text, tenantId, propertyId, recordedAt]
+      properties:
+        id: { type: string }
+        text: { type: string }
+        tenantId: { type: string }
+        propertyId: { type: string }
+        recordedAt: { type: string, format: date-time }
+    SlaPreviewRequest:
+      type: object
+      required: [events, targetMinutes, now]
+      properties:
+        events:
+          type: array
+          items: { $ref: "#/components/schemas/JobClockEvent" }
+        targetMinutes: { type: integer, minimum: 1 }
+        now: { type: string, format: date-time }
+    JobClockEvent:
+      type: object
+      required: [type, occurredAt]
+      properties:
+        type: { type: string, enum: [JobLogged, JobCompleted] }
+        occurredAt: { type: string, format: date-time }
+    SlaSnapshot:
+      type: object
+      required: [elapsedMs, pausedMs, remainingMs, breached, foldVersion]
+      properties:
+        elapsedMs: { type: integer }
+        pausedMs: { type: integer }
+        remainingMs: { type: integer }
+        breached: { type: boolean }
+        foldVersion: { type: integer }

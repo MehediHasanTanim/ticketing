@@ -1,0 +1,150 @@
+{
+  "foldVersion": 1,
+  "description": "The SLA fold's behaviour, as data. Executed by BOTH the TypeScript fold (core/src/job/sla.ts) and the single Dart port (clients/mobile/lib/sla/sla_fold.dart). Both runs gate the release (AD-14). Story 1.0 covers the trivial elapsed case only; Stories 3.4, 3.7 and 3.8 ADD vectors here and must extend both implementations.",
+  "pendingSemantics": [
+    {
+      "story": "3.7",
+      "adds": "paused intervals excluded from measurement; consecutive and nested pauses"
+    },
+    {
+      "story": "3.5",
+      "adds": "reassignment mid-clock preserves the clock"
+    },
+    {
+      "story": "3.8",
+      "adds": "a breach whose occurredAt precedes its recordedAt (the offline case)"
+    },
+    {
+      "story": "3.7",
+      "adds": "a Job paused past its configured maximum"
+    }
+  ],
+  "vectors": [
+    {
+      "name": "in-progress, well within target",
+      "targetMinutes": 60,
+      "now": "2026-09-02T10:30:00.000Z",
+      "events": [
+        {
+          "type": "JobLogged",
+          "occurredAt": "2026-09-02T10:00:00.000Z"
+        }
+      ],
+      "expect": {
+        "elapsedMs": 1800000,
+        "pausedMs": 0,
+        "remainingMs": 1800000,
+        "breached": false
+      }
+    },
+    {
+      "name": "in-progress, exactly at target - not breached",
+      "targetMinutes": 30,
+      "now": "2026-09-02T10:30:00.000Z",
+      "events": [
+        {
+          "type": "JobLogged",
+          "occurredAt": "2026-09-02T10:00:00.000Z"
+        }
+      ],
+      "expect": {
+        "elapsedMs": 1800000,
+        "pausedMs": 0,
+        "remainingMs": 0,
+        "breached": false
+      }
+    },
+    {
+      "name": "in-progress, one millisecond past target - breached",
+      "targetMinutes": 30,
+      "now": "2026-09-02T10:30:00.001Z",
+      "events": [
+        {
+          "type": "JobLogged",
+          "occurredAt": "2026-09-02T10:00:00.000Z"
+        }
+      ],
+      "expect": {
+        "elapsedMs": 1800001,
+        "pausedMs": 0,
+        "remainingMs": -1,
+        "breached": true
+      }
+    },
+    {
+      "name": "completed within target - the clock stops at completion, not at now",
+      "targetMinutes": 60,
+      "now": "2026-09-02T18:00:00.000Z",
+      "events": [
+        {
+          "type": "JobLogged",
+          "occurredAt": "2026-09-02T10:00:00.000Z"
+        },
+        {
+          "type": "JobCompleted",
+          "occurredAt": "2026-09-02T10:45:00.000Z"
+        }
+      ],
+      "expect": {
+        "elapsedMs": 2700000,
+        "pausedMs": 0,
+        "remainingMs": 900000,
+        "breached": false
+      }
+    },
+    {
+      "name": "completed after target - breach is remembered after completion",
+      "targetMinutes": 30,
+      "now": "2026-09-02T18:00:00.000Z",
+      "events": [
+        {
+          "type": "JobLogged",
+          "occurredAt": "2026-09-02T10:00:00.000Z"
+        },
+        {
+          "type": "JobCompleted",
+          "occurredAt": "2026-09-02T11:00:00.000Z"
+        }
+      ],
+      "expect": {
+        "elapsedMs": 3600000,
+        "pausedMs": 0,
+        "remainingMs": -1800000,
+        "breached": true
+      }
+    },
+    {
+      "name": "events supplied out of order - the fold orders by occurredAt, not by arrival (AD-2)",
+      "targetMinutes": 60,
+      "now": "2026-09-02T18:00:00.000Z",
+      "events": [
+        {
+          "type": "JobCompleted",
+          "occurredAt": "2026-09-02T10:45:00.000Z"
+        },
+        {
+          "type": "JobLogged",
+          "occurredAt": "2026-09-02T10:00:00.000Z"
+        }
+      ],
+      "expect": {
+        "elapsedMs": 2700000,
+        "pausedMs": 0,
+        "remainingMs": 900000,
+        "breached": false
+      }
+    },
+    {
+      "name": "no JobLogged yet - the clock has not started",
+      "targetMinutes": 60,
+      "now": "2026-09-02T10:30:00.000Z",
+      "events": [],
+      "expect": {
+        "elapsedMs": 0,
+        "pausedMs": 0,
+        "remainingMs": 3600000,
+        "breached": false
+      }
+    }
+  ]
+}

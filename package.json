@@ -1,0 +1,37 @@
+{
+  "name": "jazzticketing",
+  "version": "0.1.0",
+  "private": true,
+  "description": "JazzTicketing - hospitality service operations. Story 1.0: repository, first cell, three gates.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "codegen": "node contracts/scripts/gen-ts.mjs",
+    "migrate": "node dist/ops/migrate.js",
+    "rebuild-projections": "node dist/app/src/rebuild-projections.js",
+    "start": "node dist/edge/src/main.js",
+    "gate:boundaries": "depcruise --config .dependency-cruiser.cjs core adapters app edge",
+    "gate:codegen-drift": "node scripts/gate-codegen-drift.mjs",
+    "gate:sla-fixtures": "node scripts/gate-sla-fixtures.mjs",
+    "gate:isolation": "vitest run tests/isolation.test.ts",
+    "gate:control-plane": "vitest run tests/control-plane.test.ts",
+    "test:unit": "vitest run tests/unit",
+    "smoke": "vitest run tests/smoke.test.ts",
+    "gates": "npm run gate:boundaries && npm run gate:codegen-drift && npm run gate:sla-fixtures && npm run gate:isolation && npm run gate:control-plane",
+    "negative-controls": "bash scripts/negative-controls.sh"
+  },
+  "dependencies": {
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "@types/pg": "8.11.10",
+    "dependency-cruiser": "18.2.0",
+    "openapi-typescript": "7.13.0",
+    "tsx": "4.19.2",
+    "typescript": "5.9.3",
+    "vitest": "4.1.11"
+  }
+}
