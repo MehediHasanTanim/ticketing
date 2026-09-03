@@ -69,6 +69,29 @@ function checkDockerfile(path, label) {
   }
 }
 
+/**
+ * A non-root nginx image has to prepare its pid file at its REAL path. On Alpine
+ * /var/run is a symlink to /run and `chown -R /var/run` does not dereference it,
+ * so the directory stays root-owned, the master cannot create its pid file, and
+ * the container comes up with nothing listening. Cost Tanim one failed
+ * `docker compose up` on 2026-09-03; caught statically from now on.
+ */
+function checkNginxPidPath(path, label) {
+  if (!existsSync(path)) return;
+  const src = readFileSync(path, 'utf8');
+  const runsAsNonRoot = /^USER\s+(?!root|0\b)/m.test(src);
+  const usesNginx = /nginx/i.test(src);
+  if (!runsAsNonRoot || !usesNginx) return;
+  const prepares = /touch\s+\/run\/nginx\.pid/.test(src) && /chown[^\n]*\/run\/nginx\.pid/.test(src);
+  if (prepares) return ok(`${label}: prepares /run/nginx.pid for the non-root user`);
+  if (/chown[^\n]*\/var\/run(\s|\\|$)/.test(src)) {
+    bad(`${label}: chowns /var/run, which is a SYMLINK to /run on Alpine - chown -R does not `
+      + `dereference it, so nginx cannot write its pid file. touch and chown /run/nginx.pid instead.`);
+  } else {
+    bad(`${label}: runs nginx as a non-root user without preparing /run/nginx.pid`);
+  }
+}
+
 function checkDockerignore(path, label, mustExclude) {
   if (!existsSync(path)) return bad(`${label}: ${path} is missing`);
   const entries = readFileSync(path, 'utf8').split('\n').map((l) => l.trim());
@@ -79,6 +102,7 @@ function checkDockerignore(path, label, mustExclude) {
 
 checkDockerfile('Dockerfile', 'api image');
 checkDockerfile('clients/console/Dockerfile', 'console image');
+checkNginxPidPath('clients/console/Dockerfile', 'console image');
 checkDockerignore('.dockerignore', 'api image', ['node_modules', '.env', '.git', 'dist']);
 checkDockerignore('clients/console/.dockerignore', 'console image', ['node_modules', '.env', 'dist']);
 

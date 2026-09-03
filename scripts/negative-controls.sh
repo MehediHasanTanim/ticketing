@@ -124,6 +124,18 @@ PY
 expect_red "container gate, no image-tag race (AC-5)" node scripts/gate-containers.mjs
 cp /tmp/compose.race.bak docker-compose.yml
 
+echo "== 13. container gate: chown /var/run instead of the real pid path =="
+cp clients/console/Dockerfile /tmp/console.pid.bak
+python3 - <<'PY'
+import pathlib,re
+p=pathlib.Path('clients/console/Dockerfile'); t=p.read_text()
+t=re.sub(r"RUN chmod \+x /docker-entrypoint\.d/10-write-config\.sh \\\n(?:.*\n)*? && chown -R nginx:nginx /var/cache/nginx /usr/share/nginx/html /etc/nginx/conf\.d",
+ "RUN chmod +x /docker-entrypoint.d/10-write-config.sh \\\n && mkdir -p /var/cache/nginx /var/run \\\n && chown -R nginx:nginx /var/cache/nginx /var/run /usr/share/nginx/html /etc/nginx/conf.d", t)
+p.write_text(t)
+PY
+expect_red "container gate, nginx pid path (AC-5)" node scripts/gate-containers.mjs
+cp /tmp/console.pid.bak clients/console/Dockerfile
+
 echo
 echo "negative controls: ${pass} correctly went red, ${fail} did not, ${unverified} unverifiable here"
 [ "${fail}" -eq 0 ]

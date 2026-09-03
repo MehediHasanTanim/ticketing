@@ -46,9 +46,27 @@ COPY docker-entrypoint.d/10-write-config.sh /docker-entrypoint.d/10-write-config
 # Run as the nginx user on 8081 (a port above 1024, so no NET_BIND_SERVICE
 # capability is needed). The port lives in nginx.conf - there is no sed rewriting a
 # default config, because this image ships its own.
+#
+# Everything nginx writes to as a non-root user has to be prepared here, and the
+# pid file is the one that bites:
+#
+#   nginx:alpine's main config says `pid /var/run/nginx.pid`, and on Alpine
+#   /var/run is a SYMLINK to /run. `chown -R /var/run` does NOT dereference a
+#   symlink argument, so it retags the link and never touches /run - leaving the
+#   directory root-owned, the master unable to create its pid file, and the
+#   container up but with nothing listening. Create the pid file at its REAL path
+#   and chown that.
+#
+# The temp directories are pre-created for the same reason: nginx would otherwise
+# mkdir them under /var/cache/nginx on first request.
 RUN chmod +x /docker-entrypoint.d/10-write-config.sh \
- && mkdir -p /var/cache/nginx /var/run \
- && chown -R nginx:nginx /var/cache/nginx /var/run /usr/share/nginx/html /etc/nginx/conf.d
+ && mkdir -p /run \
+      /var/cache/nginx/client_temp /var/cache/nginx/proxy_temp \
+      /var/cache/nginx/fastcgi_temp /var/cache/nginx/uwsgi_temp \
+      /var/cache/nginx/scgi_temp \
+ && touch /run/nginx.pid \
+ && chown nginx:nginx /run /run/nginx.pid \
+ && chown -R nginx:nginx /var/cache/nginx /usr/share/nginx/html /etc/nginx/conf.d
 
 USER nginx
 EXPOSE 8081
