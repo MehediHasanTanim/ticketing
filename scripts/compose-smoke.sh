@@ -7,8 +7,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-API_PORT="${API_PORT:-3000}"
-CONSOLE_PORT="${CONSOLE_PORT:-8080}"
+API_PORT="${API_PORT:-3001}"
+CONSOLE_PORT="${CONSOLE_PORT:-8081}"
 COMPOSE="docker compose"
 
 cleanup() {

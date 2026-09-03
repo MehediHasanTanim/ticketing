@@ -34,10 +34,26 @@ framework into the domain.
 
 ```bash
 docker compose up -d --wait     # postgres, redis, migrations, api, console
-curl localhost:3000/v1/health   # {"status":"ok",...}
-open http://localhost:8080      # the console
+curl localhost:3001/v1/health   # {"status":"ok",...}
+open http://localhost:8081      # the console
 docker compose down -v
 ```
+
+**Published ports**, all overridable (`API_PORT`, `CONSOLE_PORT`, `POSTGRES_PORT`,
+`REDIS_PORT`) and chosen to stay clear of a machine already running Postgres:
+
+| Service | Host | Inside the compose network |
+|---|---|---|
+| api | **3001** | 3001 — the API listens on 3001 in a container or on a host |
+| console | **8081** | 8081 |
+| postgres | **5433** | **5432** |
+| redis | **6380** | **6379** |
+
+Postgres and Redis keep their standard ports *inside* the network, because each
+container has its own network namespace and nothing there can collide — which is
+why the API's `DATABASE_URL` still says `postgres:5432`. The host mapping is the
+only thing that needs to move. Running the API on the host against the compose
+datastores is the case that uses 5433 and 6380; `.env.example` is written that way.
 
 `npm run compose:smoke` builds both images, stands the cell up, and asserts the
 API reports every dependency reachable, runs as non-root on a read-only
@@ -56,7 +72,7 @@ cp .env.example .env      # then set the two DATABASE_URLs and REDIS_URL
 npm ci
 npm run build
 npm run migrate           # applied from source; there is no manual SQL step
-npm start                 # GET /v1/health
+npm start                 # GET localhost:3001/v1/health
 ```
 
 Postgres 16 and Redis 7 must be reachable. The application connects as a
@@ -96,7 +112,7 @@ never failed is not known to work.
 | One SLA fold, two languages | `npm run gate:sla-fixtures` | AD-14 - TypeScript fold and the single Dart port over the same vectors |
 | Cross-tenant isolation | `npm run gate:isolation` | AD-3 / DG-1 through every public interface |
 | Control plane holds no guest data | `npm run gate:control-plane` | AD-4 |
-| Container definitions | `npm run gate:containers` | non-root, health-checked, no baked secrets, ordered startup, no host bind mounts |
+| Container definitions | `npm run gate:containers` | non-root, health-checked, no baked secrets, ordered startup, no host bind mounts, no hard-coded host ports |
 
 `npm run gates` runs them all. `npm run smoke` proves the cell actually serves a
 command end to end and that a projection rebuild reproduces the same state.

@@ -101,4 +101,6 @@ jobs:
       - name: build the console image
         run: docker build -t jazzticketing/console:ci ./clients/console
       - name: compose smoke - the containerised cell runs
+        # Defaults (api 3001, console 8081, postgres 5433, redis 6380) are what a
+        # developer machine uses; the runner has no conflicts either way.
         run: bash scripts/compose-smoke.sh

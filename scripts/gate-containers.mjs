@@ -155,6 +155,18 @@ if (cfg) {
   }
   ok('compose: no host bind mounts');
 
+  // Every published host port must be an override with a default, never a bare
+  // number. A hard-coded host port is a merge conflict waiting to happen on any
+  // machine that already runs Postgres - which is exactly how this rule arrived.
+  const raw = readFileSync('docker-compose.yml', 'utf8');
+  const hardcoded = [];
+  for (const m of raw.matchAll(/^\s*-\s*"?(\d+):(\d+)"?\s*$/gm)) hardcoded.push(m[0].trim());
+  if (hardcoded.length) {
+    bad(`compose: ${hardcoded.length} published port(s) are hard-coded, not \${VAR:-default}: ${hardcoded.join(', ')}`);
+  } else {
+    ok('compose: every published host port is env-overridable');
+  }
+
   // Every image tag must be pinned to something, not floating on :latest.
   for (const [name, s] of Object.entries(svc)) {
     if (typeof s.image === 'string' && /(:latest$|^[^:]+$)/.test(s.image)) {

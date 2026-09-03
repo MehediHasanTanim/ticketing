@@ -36,8 +36,10 @@ RUN npx tsc -p tsconfig.json
 
 # ----------------------------------------------------------------------- runtime
 FROM node:22-alpine AS runtime
+# PORT is the port the API LISTENS on, in a container or on a host. 3001 rather
+# than 3000 at Tanim's request (2026-09-03).
 ENV NODE_ENV=production \
-    PORT=3000 \
+    PORT=3001 \
     FIXTURE_AUTH=0
 WORKDIR /app
 
@@ -52,10 +54,10 @@ COPY --chown=node:node package.json ./
 # runs correctly with readOnlyRootFilesystem in Kubernetes.
 USER node
 
-EXPOSE 3000
+EXPOSE 3001
 
 # Health is the only unauthenticated route, which is what makes it usable here.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=15s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/v1/health').then(r=>r.json()).then(b=>process.exit(b.status==='ok'?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3001)+'/v1/health').then(r=>r.json()).then(b=>process.exit(b.status==='ok'?0:1)).catch(()=>process.exit(1))"
 
 CMD ["node", "dist/edge/src/main.js"]

@@ -432,3 +432,47 @@ container gate clean via the YAML path with no Docker CLI present, unit tests 11
 **Bridge note:** `npm ci` cannot run through the Cowork folder mount — it deletes
 `node_modules` first and deletes are not permitted there. Use `npm install` on the
 mount, or run from a normal terminal on the Mac.
+
+### Ports changed 2026-09-03 at Tanim's request
+
+His machine already runs Postgres on 5432. Published host ports are now:
+
+| Service | Host | Inside the compose network |
+|---|---|---|
+| api | **3001** | 3001 — `PORT` is the port the API listens on, container or host |
+| console | **8081** | 8081 — nginx listens there too |
+| postgres | **5433** | **5432** |
+| redis | **6380** | **6379** |
+
+**Why Postgres and Redis keep their standard ports inside the network.** Each
+container has its own network namespace, so nothing there can collide — the
+conflict is on the host, and the host mapping is the only thing that needs to move.
+That is why the API's `DATABASE_URL` still says `postgres:5432`: it is talking to
+the container, not to Tanim's machine. Moving the internal port would mean
+overriding the official image's command for no benefit.
+
+Redis was moved to 6380 as well, unasked. A machine with Postgres occupied very
+often has Redis occupied too, and every published port is an override with a
+default (`API_PORT`, `CONSOLE_PORT`, `POSTGRES_PORT`, `REDIS_PORT`), so it costs
+nothing to set a safe default and one variable to put it back.
+
+Files touched: `docker-compose.yml`, `Dockerfile` (`ENV PORT`, `EXPOSE`,
+healthcheck fallback), `clients/console/Dockerfile` (`EXPOSE`, healthcheck),
+`clients/console/nginx.conf` (`listen`), `edge/src/main.ts` (host default),
+`adapters/../redis-probe` caller in `edge/src/server.ts` (host fallback now 6380 to
+match), `.env.example`, `scripts/compose-smoke.sh`, `README.md`. A stale `sed` in
+the console Dockerfile that rewrote a default config the image no longer uses was
+removed while in there.
+
+**A new invariant, with its own negative control.** `gate:containers` now fails if
+any published host port is a bare number instead of `${VAR:-default}` — a
+hard-coded host port is a merge conflict waiting for the next developer whose
+machine is already busy, which is precisely how this change arrived. Negative
+controls are now **9 confirmed red**, 1 vacuous (Dart).
+
+Re-verified: build clean, **29/29 tests**, all six gates green, resolved compose
+shows `api 3001->3001`, `console 8081->8081`, `postgres 5433->5432`,
+`redis 6380->6379`, and an override run (`API_PORT=4100 CONSOLE_PORT=9100
+POSTGRES_PORT=6543 REDIS_PORT=6399`) resolves correctly including the console's
+derived `API_BASE_URL`. Re-verified on Tanim's machine: build clean, container gate
+clean, unit tests 11/11.

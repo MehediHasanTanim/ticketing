@@ -2,7 +2,7 @@ import { createApp } from './server';
 import { cellName } from '@adapters/postgres/config';
 import { closePool } from '@adapters/postgres/pool';
 
-const port = Number(process.env.PORT ?? 3000);
+const port = Number(process.env.PORT ?? 3001);
 const server = createApp();
 
 server.listen(port, () => {

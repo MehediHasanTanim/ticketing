@@ -86,7 +86,10 @@ export function createApp(): Server {
       if (req.method === 'GET' && url.pathname === '/v1/health') {
         const [eventStore, cache] = await Promise.all([
           getPool().query('SELECT 1').then(() => 'ok' as const).catch(() => 'unreachable' as const),
-          pingRedis(process.env.REDIS_URL ?? 'redis://127.0.0.1:6379')
+          // Fallback matches the HOST-published port in docker-compose.yml and
+          // .env.example (6380), not Redis's standard 6379 - a developer running
+          // the API on the host against the compose cell reaches it there.
+          pingRedis(process.env.REDIS_URL ?? 'redis://127.0.0.1:6380')
             .then((ok) => (ok ? 'ok' as const : 'unreachable' as const)),
         ]);
         const status = eventStore === 'ok' && cache === 'ok' ? 'ok' : 'degraded';

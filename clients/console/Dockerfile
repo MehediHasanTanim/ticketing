@@ -34,17 +34,17 @@ COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY docker-entrypoint.d/10-write-config.sh /docker-entrypoint.d/10-write-config.sh
 
-# nginx:alpine already ships an unprivileged path: run as the nginx user on 8080
-# so the container needs no NET_BIND_SERVICE capability.
+# Run as the nginx user on 8081 (a port above 1024, so no NET_BIND_SERVICE
+# capability is needed). The port lives in nginx.conf - there is no sed rewriting a
+# default config, because this image ships its own.
 RUN chmod +x /docker-entrypoint.d/10-write-config.sh \
- && sed -i 's|listen       80;|listen       8080;|' /etc/nginx/conf.d/default.conf 2>/dev/null || true \
  && mkdir -p /var/cache/nginx /var/run \
  && chown -R nginx:nginx /var/cache/nginx /var/run /usr/share/nginx/html /etc/nginx/conf.d
 
 USER nginx
-EXPOSE 8080
+EXPOSE 8081
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:8080/healthz >/dev/null 2>&1 || exit 1
+  CMD wget -qO- http://127.0.0.1:8081/healthz >/dev/null 2>&1 || exit 1
 
 CMD ["nginx", "-g", "daemon off;"]

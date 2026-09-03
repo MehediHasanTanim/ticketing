@@ -89,6 +89,12 @@ sed -i 's/        condition: service_completed_successfully/        condition: s
 expect_red "container gate, migration ordering (AC-5)" node scripts/gate-containers.mjs
 cp /tmp/compose.bak docker-compose.yml
 
+echo "== 10. container gate: hard-code a published host port =="
+cp docker-compose.yml /tmp/compose.ports.bak
+sed -i 's|      - "${CONSOLE_PORT:-8081}:8081"|      - "8081:8081"|' docker-compose.yml
+expect_red "container gate, no hard-coded host ports (AC-5)" node scripts/gate-containers.mjs
+cp /tmp/compose.ports.bak docker-compose.yml
+
 echo
 echo "negative controls: ${pass} correctly went red, ${fail} did not, ${unverified} unverifiable here"
 [ "${fail}" -eq 0 ]
