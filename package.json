@@ -19,8 +19,12 @@
     "gate:control-plane": "vitest run tests/control-plane.test.ts",
     "test:unit": "vitest run tests/unit",
     "smoke": "vitest run tests/smoke.test.ts",
-    "gates": "npm run gate:boundaries && npm run gate:codegen-drift && npm run gate:sla-fixtures && npm run gate:isolation && npm run gate:control-plane",
-    "negative-controls": "bash scripts/negative-controls.sh"
+    "gates": "npm run gate:boundaries && npm run gate:codegen-drift && npm run gate:containers && npm run gate:sla-fixtures && npm run gate:isolation && npm run gate:control-plane",
+    "negative-controls": "bash scripts/negative-controls.sh",
+    "gate:containers": "node scripts/gate-containers.mjs",
+    "compose:up": "docker compose up -d --wait",
+    "compose:down": "docker compose down -v",
+    "compose:smoke": "bash scripts/compose-smoke.sh"
   },
   "dependencies": {
     "pg": "8.23.0"
@@ -32,6 +36,7 @@
     "openapi-typescript": "7.13.0",
     "tsx": "4.19.2",
     "typescript": "5.9.3",
-    "vitest": "4.1.11"
+    "vitest": "4.1.11",
+    "yaml": "2.7.0"
   }
 }

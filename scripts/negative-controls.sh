@@ -77,6 +77,18 @@ else
   echo "  SKIP  clients/console dependencies not installed"
 fi
 
+echo "== 8. container gate: drop USER from the api image =="
+cp Dockerfile /tmp/Dockerfile.bak
+sed -i '/^USER node$/d' Dockerfile
+expect_red "container gate, non-root (AC-5)" node scripts/gate-containers.mjs
+cp /tmp/Dockerfile.bak Dockerfile
+
+echo "== 9. container gate: let the api start before migrations finish =="
+cp docker-compose.yml /tmp/compose.bak
+sed -i 's/        condition: service_completed_successfully/        condition: service_started/' docker-compose.yml
+expect_red "container gate, migration ordering (AC-5)" node scripts/gate-containers.mjs
+cp /tmp/compose.bak docker-compose.yml
+
 echo
 echo "negative controls: ${pass} correctly went red, ${fail} did not, ${unverified} unverifiable here"
 [ "${fail}" -eq 0 ]

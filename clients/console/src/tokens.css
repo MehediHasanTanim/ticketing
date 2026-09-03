@@ -41,3 +41,4 @@ body {
 button.primary { background: var(--accent); color: var(--ink-on-accent);
   border: 0; border-radius: var(--radius);
   padding-inline: var(--space-4); padding-block: var(--space-2); }
+.hint { color: var(--paused); font-size: 0.875rem; margin-block-start: var(--space-6); }

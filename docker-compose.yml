@@ -1,0 +1,106 @@
+# JazzTicketing - one region cell, locally. Story 1.0 / AC-5.
+#
+# `docker compose up` stands up the whole cell with nothing installed on the host:
+# Postgres event store, Redis, migrations applied from source, the API, and the
+# console. This is what makes "reproducible from the repository alone" true for
+# someone who has not installed Postgres.
+#
+# It is deliberately NOT a production topology. Provider, Kubernetes flavour and
+# IaC tooling are DEFERRED by the architecture spine, to be decided with whoever
+# operates Jazz Core so both run under one on-call rota (OR-4). This file encodes
+# none of that - it is the developer's cell and the CI smoke target.
+
+name: jazzticketing
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-jazzticketing}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ${POSTGRES_DB:-jazzticketing}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # One-shot. Same image as the API, so migrations can never be applied from a
+  # different build than the code that reads them.
+  migrate:
+    build:
+      context: .
+      target: runtime
+    image: jazzticketing/api:dev
+    command: ["node", "dist/ops/migrate.js"]
+    environment:
+      DATABASE_URL_ADMIN: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-jazzticketing}
+      # Set in any real environment from the platform secret store; migrate.ts
+      # rotates the application role's password to this value.
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      target: runtime
+    image: jazzticketing/api:dev
+    environment:
+      CELL_NAME: ${CELL_NAME:-local-eu-west-1}
+      PORT: 3000
+      DATABASE_URL_ADMIN: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-jazzticketing}
+      DATABASE_URL_APP: postgres://jt_app:${APP_DB_PASSWORD:-jt_app_local_only}@postgres:5432/${POSTGRES_DB:-jazzticketing}
+      REDIS_URL: redis://redis:6379
+      # Story 1.0 only, and off unless a developer opts in. Story 1.5 removes it.
+      FIXTURE_AUTH: ${FIXTURE_AUTH:-0}
+    ports:
+      - "${API_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  console:
+    build:
+      context: ./clients/console
+    image: jazzticketing/console:dev
+    environment:
+      # Same-origin in a real deployment, where the edge fronts both. Pointed at
+      # the published API port here because compose has no shared ingress.
+      API_BASE_URL: ${CONSOLE_API_BASE_URL:-http://localhost:3000/v1}
+      CELL_NAME: ${CELL_NAME:-local-eu-west-1}
+    ports:
+      - "${CONSOLE_PORT:-8080}:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+volumes:
+  pgdata:

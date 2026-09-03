@@ -1,16 +1,24 @@
-import { StrictMode } from 'react';
+import { StrictMode, useEffect, useState, type JSX } from 'react';
 import { createRoot } from 'react-dom/client';
 import './tokens.css';
+import { loadRuntimeConfig, type RuntimeConfig } from './runtime-config';
 
 /**
  * Story 1.0 console scaffold: enough to prove the toolchain builds, the tokens
- * load, and the directional lint has something to police. Real surfaces begin in
- * Story 3.10 (the open-work list) and Story 6.1 (the department dashboard).
+ * load, the directional lint has something to police, and the image reads its
+ * configuration at RUNTIME rather than having it baked in at build time.
  *
- * State is never colour alone (NFR-6): each badge carries a glyph, a word and,
- * where relevant, a number - and it must survive greyscale.
+ * Real surfaces begin in Story 3.10 (the open-work list) and Story 6.1 (the
+ * department dashboard).
+ *
+ * State is never colour alone (NFR-6): each badge carries a glyph, a word and a
+ * number, and the distinction must survive greyscale.
  */
-function Health(): JSX.Element {
+function App(): JSX.Element {
+  const [config, setConfig] = useState<RuntimeConfig | undefined>(undefined);
+
+  useEffect(() => { void loadRuntimeConfig().then(setConfig); }, []);
+
   return (
     <main>
       <h1>JazzTicketing</h1>
@@ -21,10 +29,15 @@ function Health(): JSX.Element {
         <span className="badge badge--breach">■ Breached 12m</span>
       </p>
       <button className="primary" type="button">Primary action</button>
+      <p className="hint">
+        {config
+          ? `cell ${config.cellName} · api ${config.apiBaseUrl}`
+          : 'reading runtime configuration…'}
+      </p>
     </main>
   );
 }
 
 createRoot(document.getElementById('root')!).render(
-  <StrictMode><Health /></StrictMode>,
+  <StrictMode><App /></StrictMode>,
 );

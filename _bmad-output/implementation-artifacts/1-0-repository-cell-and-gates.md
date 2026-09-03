@@ -90,6 +90,17 @@ so that every story after this one is verified by the checks the architecture de
   - [ ] `clients/console`: React 18 + Vite, TanStack Query, **no CSS framework**. Import the `DESIGN.md` tokens as CSS custom properties in one file — accent petrol `#27565D` with white ink, cyan `#08FCFF` as a highlight only. No story may hard-code a hex.
   - [ ] `clients/mobile`: Flutter app with `Directionality`, `flutter_localizations` and ARB wiring in place, plus **en** and **ar** locale files present even if nearly empty. Drift-backed SQLite initialised.
   - [ ] Add a lint that fails on `EdgeInsets.only(left:` / `right:` and on CSS `margin-left`/`padding-right` etc. in the console. Logical direction only (AD-12). Retrofitting bidirectional layout later is a rebuild of the layout layer, which is exactly what this cheap rule prevents.
+- [ ] **T8. Containerise the cell** (AC: 5) — *added 2026-09-03 at Tanim's request. A task under AC-5, not a new criterion; `epics.md` is final.*
+  - [ ] `Dockerfile` for the API: multi-stage, production dependencies only, non-root, read-only-root-filesystem compatible, `HEALTHCHECK` on `/v1/health`, exec-form `CMD`, graceful SIGTERM drain.
+  - [ ] **The same image runs the migrations** (`node dist/ops/migrate.js`) and the projection rebuild, so a deploy can never apply migrations from a different build than the code that reads them.
+  - [ ] `clients/console/Dockerfile`: Vite build served by nginx as non-root on 8080, with the type-check **and** the directional lint running inside the image build.
+  - [ ] **The console image is environment-agnostic** — the API URL is not baked in; an entrypoint writes `/config.json` from environment at container start and the app fetches it. One image, many environments.
+  - [ ] `docker-compose.yml`: postgres, redis, a one-shot migrate service, api, console — with healthchecks and `service_completed_successfully` ordering so the API cannot serve against an unmigrated schema.
+  - [ ] Secrets never in an image layer: `ops/migrate.ts` rotates the application role's password from `APP_DB_PASSWORD`, so the committed SQL's password is local-only.
+  - [ ] `scripts/compose-smoke.sh` — build both images, stand the cell up, assert health, non-root, read-only filesystem, the console's runtime config, and that migrations were recorded.
+  - [ ] `scripts/gate-containers.mjs` — a static gate for what a build would otherwise prove, runnable with or without a Docker CLI.
+  - [ ] CI job `container-images` builds both images and runs the compose smoke.
+
 - [ ] **T7. Gate negative controls and version confirmation** (AC: 6, 7)
   - [ ] For each of the three gates, run it against a deliberately broken fixture, capture the red output, revert. Record all three in the Dev Agent Record.
   - [ ] Confirm each version below against its official source. Record confirmed versions; report divergence from the spine's proposal to Tanim rather than adopting silently.
@@ -304,3 +315,120 @@ negative controls: 6 correctly went red, 0 did not, 1 unverifiable here
 - `docs/` - `stack-versions.md`, `decisions/0001-http-framework-deferred.md`
 
 **Test totals:** 29 passing (10 isolation, 6 smoke, 2 control-plane, 11 unit).
+
+---
+
+## Addendum — containerisation (2026-09-03)
+
+Tanim asked whether the backend API and the frontend web app were dockerised. They
+were not: the repository had no Dockerfile, no compose file and no manifests, and
+`ops/` held only migrations. AC-5 was satisfied with **processes** rather than
+**images** — the letter of "reproducible from the repository alone", but a weaker
+reading than the spine's "Managed Kubernetes or equivalent per region", which needs
+images. Worse, it had not been raised. Added now as **T8 under AC-5**, not as a new
+criterion.
+
+### What was added
+
+| File | What it does |
+|---|---|
+| `Dockerfile` | API image. Three stages (deps / build / runtime), production dependencies only, `USER node`, exec-form `CMD`, `HEALTHCHECK` on `/v1/health`. Carries `ops/migrations/*.sql` because migrations are read from source at runtime. |
+| `clients/console/Dockerfile` | Console image. Vite build served by `nginx` as non-root on 8080. Runs `tsc -b` **and** the directional lint inside the build. |
+| `clients/console/nginx.conf` | SPA fallback, immutable hashed assets, `no-store` on `index.html` and `config.json`, `server_tokens off`, nosniff, trimmed referrer. |
+| `clients/console/docker-entrypoint.d/10-write-config.sh` | Writes `/config.json` from environment at container start. |
+| `clients/console/src/runtime-config.ts` | The app fetches that config, falling back to same-origin `/v1` for `vite dev`. |
+| `docker-compose.yml` | postgres, redis, one-shot migrate, api, console. Healthchecks throughout; api waits on `service_completed_successfully`. |
+| `.dockerignore` ×2 | Keep `node_modules`, `.env`, `.git` and build output out of the context. |
+| `scripts/compose-smoke.sh` | Builds, stands the cell up, asserts health, non-root uid, read-only filesystem, console config and shell, and the migration ledger. |
+| `scripts/gate-containers.mjs` | The static container gate (below). |
+| CI `container-images` job | Builds both images and runs the compose smoke. |
+
+### Three decisions worth knowing
+
+1. **One image runs the API, the migrations and the projection rebuild.** Same build,
+   same code — a deploy cannot apply migrations from a different build than the code
+   that will read them.
+2. **The console image is environment-agnostic.** Baking an API URL in at build time
+   means one image per environment, which is painful to undo once pipelines depend on
+   it. The entrypoint writes `/config.json` instead.
+3. **Secrets never enter an image layer.** `ops/migrate.ts` now rotates the
+   application role's password from `APP_DB_PASSWORD` at migrate time, so the
+   throwaway password in migration 002 exists only to make a developer's cell work
+   out of the box.
+
+### What could NOT be verified, and why
+
+**The images have never been built.** Docker Hub, GHCR and ECR Public are all refused
+by the egress policy — `docker pull` returns 403, so buildkit cannot resolve even a
+base image and `docker build --check` is unavailable for the same reason. The Docker
+daemon itself starts fine; there is simply nothing to pull.
+
+Rather than ship unverified Dockerfiles and call the task done, `npm run
+gate:containers` asserts statically what a build-and-run would otherwise prove, and
+runs anywhere:
+
+```
+containers  PASS  api image: multi-stage (deps -> build -> runtime)
+containers  PASS  api image: runs as non-root (USER node)
+containers  PASS  api image: HEALTHCHECK present
+containers  PASS  api image: exec-form CMD (signals reach the process)
+containers  PASS  console image: multi-stage (build -> runtime)
+containers  PASS  console image: runs as non-root (USER nginx)
+containers  PASS  console image: HEALTHCHECK present
+containers  PASS  console image: exec-form CMD (signals reach the process)
+containers  PASS  api image: .dockerignore excludes node_modules, .env, .git, dist
+containers  PASS  console image: .dockerignore excludes node_modules, .env, dist
+containers  PASS  console image: runtime-config entrypoint is executable
+containers  PASS  compose: docker-compose.yml parses
+containers  PASS  compose: postgres is health-checked
+containers  PASS  compose: redis is health-checked
+containers  PASS  compose: api waits for migrations to complete
+containers  PASS  compose: api waits for postgres and redis to be healthy
+containers  PASS  compose: api root filesystem is read-only
+containers  PASS  compose: api and console drop privilege escalation
+containers  PASS  compose: no host bind mounts
+containers  PASS  compose: no :latest tags
+```
+
+It parses `docker-compose.yml` directly rather than shelling out to `docker compose
+config`, because a gate that only runs where Docker is installed is a gate that gets
+skipped. `docker compose config` is used as an extra check when the CLI is present —
+it validated the file in the cloud workspace.
+
+**Two negative controls were added** and both pass: deleting `USER node` from the API
+image, and downgrading the api→migrate condition from `service_completed_successfully`
+to `service_started`, each turn the gate red. Total now **8 of 9 controls confirmed**,
+the ninth (Dart) still vacuous here.
+
+### The container work found a latent bug in Story 1.0
+
+`clients/console/src/main.tsx` annotated `JSX.Element`, which **React 19 removed** as
+a global namespace. `vite build` does not type-check, so the original console
+"built" fine and `tsc -b` would have failed — I had only ever run the former. Found
+by adding `tsc -b` to the image build. Fixed with `import { type JSX } from 'react'`,
+and the type-check now runs inside the image so it cannot recur.
+
+### Still open after this addendum
+
+- **Base image tags are not digest-pinned** — `node:22-alpine`, `nginx:1.27-alpine`,
+  `postgres:16-alpine`, `redis:7-alpine`. The digests could not be fetched with
+  registries blocked. A floating tag is a supply-chain hole, not a style preference:
+  **pin these before any real deployment.** Recorded in `docs/stack-versions.md`.
+- **CI's `container-images` job will be the first thing ever to build these.** Expect
+  it to need fixes; nothing in these files has executed.
+- **No Kubernetes manifests, no IaC, no provider choice** — and deliberately so. The
+  spine defers provider, Kubernetes flavour and IaC tooling with a named owner and a
+  reason (decide with whoever operates Jazz Core, so both run under one on-call rota,
+  OR-4). Compose is the developer's cell and the CI smoke target; it encodes none of
+  that.
+
+### Verification after the addendum
+
+Cloud workspace, against PostgreSQL 16.13 and Redis 7.0.15: build clean, **29/29
+tests pass**, boundary gate clean (29 modules), drift gate clean, container gate
+clean, TypeScript fixture half 7/7. Re-verified on Tanim's machine: build clean,
+container gate clean via the YAML path with no Docker CLI present, unit tests 11/11.
+
+**Bridge note:** `npm ci` cannot run through the Cowork folder mount — it deletes
+`node_modules` first and deletes are not permitted there. Use `npm install` on the
+mount, or run from a normal terminal on the Mac.

@@ -80,3 +80,25 @@ jobs:
         run: npm run smoke
       - name: unit tests
         run: npm run test:unit
+
+  container-images:
+    # The gate in `npm run gate:containers` checks these definitions statically on
+    # every commit. THIS job is what proves the containerised cell actually runs -
+    # it builds both images and stands the whole cell up. It exists because the
+    # environment Story 1.0 was written in had every container registry blocked, so
+    # the images had never been built when the story was delivered.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - name: GATE container definitions (static)
+        run: npm run gate:containers
+      - name: build the api image
+        run: docker build -t jazzticketing/api:ci .
+      - name: build the console image
+        run: docker build -t jazzticketing/console:ci ./clients/console
+      - name: compose smoke - the containerised cell runs
+        run: bash scripts/compose-smoke.sh

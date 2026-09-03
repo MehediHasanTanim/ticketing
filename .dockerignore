@@ -1,0 +1,19 @@
+# Keep the build context small and the image clean. node_modules is rebuilt inside
+# the image so a developer's platform-specific binaries never leak into it.
+node_modules
+**/node_modules
+dist
+**/dist
+.git
+.github
+_bmad
+_bmad-output
+_to_delete
+_superseded
+docs
+tests
+clients/console
+clients/mobile
+.env
+*.log
+.DS_Store

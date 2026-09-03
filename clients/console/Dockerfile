@@ -1,0 +1,50 @@
+# syntax=docker/dockerfile:1.7
+#
+# JazzTicketing console - static build served by nginx. Story 1.0 / AC-5.
+#
+# ONE image, MANY environments. The API base URL is NOT baked in at build time;
+# the entrypoint writes /config.json from environment at container start and the
+# app reads it. Baking it in would mean one image per environment, which is a
+# pattern that is painful to undo once deploy pipelines depend on it.
+#
+# [UNVERIFIED] Base image tags are not digest-pinned - registries were blocked
+# where this was written. Pin by digest before deploying.
+
+FROM node:22-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY tsconfig.json vite.config.ts index.html ./
+COPY src ./src
+COPY scripts ./scripts
+# AD-12: the directional lint runs INSIDE the image build, so a physical
+# left/right property cannot reach a built artifact even if CI is skipped.
+# Type-check AND lint inside the image build. `vite build` alone does not
+# type-check, which let a React 19 breaking change (the global JSX namespace was
+# removed) sit unnoticed in Story 1.0 until the container work ran tsc.
+RUN node scripts/lint-logical-direction.mjs \
+ && npx tsc -b \
+ && npx vite build
+
+FROM nginx:1.27-alpine AS runtime
+ENV API_BASE_URL=/v1 \
+    CELL_NAME=unknown
+
+COPY --from=build /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY docker-entrypoint.d/10-write-config.sh /docker-entrypoint.d/10-write-config.sh
+
+# nginx:alpine already ships an unprivileged path: run as the nginx user on 8080
+# so the container needs no NET_BIND_SERVICE capability.
+RUN chmod +x /docker-entrypoint.d/10-write-config.sh \
+ && sed -i 's|listen       80;|listen       8080;|' /etc/nginx/conf.d/default.conf 2>/dev/null || true \
+ && mkdir -p /var/cache/nginx /var/run \
+ && chown -R nginx:nginx /var/cache/nginx /var/run /usr/share/nginx/html /etc/nginx/conf.d
+
+USER nginx
+EXPOSE 8080
+
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:8080/healthz >/dev/null 2>&1 || exit 1
+
+CMD ["nginx", "-g", "daemon off;"]

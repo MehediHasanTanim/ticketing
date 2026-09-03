@@ -30,6 +30,32 @@ are both blocked in this environment, so every Dart-side version remains unverif
 | Vite | - | **8.2.2** | **8.2.2** | |
 | TanStack Query | - | 5.102.8 | *not installed* | Nothing in Story 1.0 fetches; arrives with Story 3.10. |
 
+## Container base images - written, never built
+
+| Image | Tag used | Status |
+|---|---|---|
+| `node` | 22-alpine | **[UNVERIFIED]** not digest-pinned |
+| `nginx` | 1.27-alpine | **[UNVERIFIED]** not digest-pinned |
+| `postgres` | 16-alpine | **[UNVERIFIED]** not digest-pinned |
+| `redis` | 7-alpine | **[UNVERIFIED]** not digest-pinned |
+
+Every container registry - Docker Hub, GHCR, ECR Public - is refused by the egress
+policy in the environment where the containerisation was written. `docker build`
+cannot resolve even a base image, and `docker build --check` is unavailable for the
+same reason. So the Dockerfiles have **never been built** and the images have never
+run.
+
+Two consequences, both open:
+
+1. **Digest-pin these four tags before any real deployment.** A floating tag is a
+   supply-chain hole, not a style preference, and the digests could not be retrieved
+   here. `npm run gate:containers` enforces non-root, health-checked, no-baked-secrets
+   and ordered startup statically on every commit, but it cannot pin a digest it
+   cannot fetch.
+2. **CI's `container-images` job is what will first build them** - it builds both
+   images and runs `scripts/compose-smoke.sh` against the standing cell. Expect the
+   first run to need fixes; nothing about these files has been executed.
+
 ## Still unverified - could not be checked here
 
 | Component | Spine proposed | Blocker |

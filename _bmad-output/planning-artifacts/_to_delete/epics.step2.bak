@@ -1,0 +1,96 @@
+---
+title: JazzTicketing — Epics and Stories
+status: draft
+created: 2026-09-02
+updated: 2026-09-02
+stepsCompleted: [1, 2]
+sources:
+  - '../prds/prd-JazzTicketing-2026-08-29/prd.md'
+  - '../architecture/architecture-JazzTicketing-2026-09-02/ARCHITECTURE-SPINE.md'
+  - '../ux-designs/ux-JazzTicketing-2026-08-29/EXPERIENCE.md'
+  - '../ux-designs/ux-JazzTicketing-2026-08-29/EXPERIENCE-WEB.md'
+---
+
+# JazzTicketing — Epics and Stories
+
+## Step 1 — Extracted requirements
+
+**83 functional requirements** across nine feature groups, **11 cross-cutting NFRs**, **5 operational requirements**, **7 data-governance requirements**, and **14 architecture invariants** that bind every story.
+
+All source documents are `status: final`. Nothing upstream is re-decided here; a story that needs an upstream change is a conflict to surface, not a local override.
+
+**Upstream revision absorbed:** the mobile client is **Flutter + Dart**, not React Native (spine revision 2026-09-02b). No FR, NFR or screen changed. Two things land in this document: the amended AD-14 row below, and a new contract-drift release gate.
+
+### Architecture invariants every story inherits (read-only, original ids)
+
+| AD | Binds every story to |
+|---|---|
+| AD-1 | The Job core is event-sourced; SLA is derived, never stored as a countdown |
+| AD-2 | `occurred_at` is the domain clock; `recorded_at` is the system clock |
+| AD-3 | Every row and every event carries `tenant_id` and `property_id`; isolation lives at one boundary [ADOPTED] |
+| AD-4 | Regional cells; a Property never leaves its region; the control plane holds no guest data |
+| AD-5 | Jazz Core is reached through one port with one owner |
+| AD-6 | Cleanliness is ours; occupancy is Jazz Core's; conflicts resolve by a declared authority and are never silently discarded |
+| AD-7 | Offline is a first-class write path; the client owns a durable queue and idempotency is server-enforced |
+| AD-8 | Notification delivery is an adapter concern with a suppression contract in the domain |
+| AD-9 | Configuration is versioned and effective-dated; a running clock is never rewritten |
+| AD-10 | Guest data is minimised at ingestion and erasable by construction |
+| AD-11 | Permission is a server decision; the interface only hides what the server would refuse |
+| AD-12 | One localisation and direction contract, honoured by both clients |
+| AD-13 | One writing owner per aggregate; everyone else asks |
+| AD-14 | One SLA fold in TypeScript for server and console, plus **exactly one** Dart port for the offline handset; both run the same fixture vectors [AMENDED 2026-09-02b] |
+
+### Cross-cutting requirements that are release gates, not stories
+
+- **AD-3 / DG-1** — a cross-tenant read attempted through every public interface must fail. Its test suite gates every release, so it is not one story's acceptance criterion.
+- **AD-14 / NFR-9** — the SLA fold has one TypeScript implementation and one Dart port for the handset (the client is Flutter, and an offline countdown can neither call nor import the server's fold). The fixture vectors in `contracts/` run in **both** languages and both runs gate the release. Any story showing an SLA figure consumes one of those two; no story adds a third.
+- **Contract drift** — `contracts/` is the schema of record and the TypeScript and Dart bindings are generated from it. The codegen-drift check gates every release, so no story owns "keep the client types in sync"; a hand-written wire type on either side is a build failure, not a review comment.
+- **AD-7** — offline conflict rules are fixed per intent and verified as a suite.
+- **NFR-6 / FR-61** — greyscale legibility and bidirectional layout are acceptance criteria on every client story, not an epic of their own.
+
+## Step 2 — Epic list
+
+Ten epics. Six deliver R1; four carry R2–R4. Each is standalone: it delivers user value on its own and enables later epics without depending on them.
+
+| Epic | Release | Delivers | FRs |
+|---|---|---|---|
+| **E1 — Property go-live foundation** | R1 | A property administrator can stand a property up, put the right people in it with the right access, tune it to how the hotel works, and see every change that was made. | 8: FR-1, FR-2, FR-3, FR-5, FR-6, FR-81, FR-82, FR-83 |
+| **E2 — Jazz Core connection and room truth** | R1 | The property's operational reality — rooms, stays, calls — is in the system without anyone typing it, and when the upstream degrades the product says so instead of lying. | 13: FR-19, FR-49, FR-50, FR-51, FR-52, FR-53, FR-54, FR-55, FR-56, FR-57, FR-77, FR-78, FR-79 |
+| **E3 — Guest request dispatch with a live clock** | R1 | A guest request gets an owner and a deadline in seconds, moves through a lifecycle anyone can audit, and cannot quietly go nowhere. | 11: FR-7, FR-8, FR-9, FR-10, FR-11, FR-12, FR-13, FR-14, FR-17, FR-18, FR-36 |
+| **E4 — The handset — line staff work the floor** | R1 | A room attendant or engineer signs in on a shared handset in their own language, sees what to do next, and keeps working when the signal dies. Flutter client: it carries the durable offline queue and the one Dart SLA fold. | 8: FR-4, FR-58, FR-59, FR-60, FR-61, FR-62, FR-63, FR-64 |
+| **E5 — Escalation and notification routing** | R1 | Nobody has to watch a screen for work to arrive, and a job that breaches finds a human instead of sitting still. | 4: FR-65, FR-66, FR-67, FR-68 |
+| **E6 — Manager visibility and guest follow-up** | R1 | A manager can see load and breaches while the shift is still recoverable, prove SLA against the property's own baseline, and close the loop with the guest. | 5: FR-15, FR-16, FR-69, FR-71, FR-74 |
+| **E7 — Housekeeping operations** | R2 | Boards, room flow, inspections and turndown — the highest-volume surface in the product and the strongest proof of two-way room status. | 11: FR-20, FR-21, FR-22, FR-23, FR-24, FR-25, FR-26, FR-27, FR-28, FR-29, FR-80 |
+| **E8 — Engineering, assets and preventive maintenance** | R3 | Reactive work orders against an asset registry that accumulates history, plus the preventive schedule a busy day would otherwise bury. | 10: FR-30, FR-31, FR-32, FR-33, FR-34, FR-35, FR-37, FR-38, FR-39, FR-72 |
+| **E9 — Incidents, recovery and Lost & Found** | R4 | Service failure gets recorded with a cause and a cost, recovery is approved rather than improvised, and found property has a chain of custody. | 9: FR-40, FR-41, FR-42, FR-43, FR-44, FR-45, FR-46, FR-47, FR-48 |
+| **E10 — Full reporting and evidence** | R4 | The GM dashboard, glitch and recovery reporting, the brand evidence pack, and the corporate cross-property view. | 4: FR-70, FR-73, FR-75, FR-76 |
+
+### Coverage check
+
+All 83 functional requirements are owned by **exactly one** epic — no gaps, no requirement owned twice. Verified programmatically rather than by reading: the sum of the FR counts above is 83 and the union has no duplicates.
+
+Five requirements are *used* by an epic that does not own them. Ownership means the acceptance criteria live there and that epic is done when they pass; a consuming epic depends on the behaviour but adds no criteria of its own for it. Making this explicit prevents the same rule being specified — and drifting — in two places.
+
+| FR | Owner | Also consumed by | Why the split falls here |
+|---|---|---|---|
+| FR-4 Shared Device sign-in | E4 | E1 | The sign-in and hand-off behaviour is a handset concern. E1 only provisions the PIN credential, as part of FR-3 and FR-82. |
+| FR-11 Acceptance window | E3 | E5 | The window is a derivation of the SLA fold (AD-14), so it belongs with the clock. E5 consumes its expiry as a chain trigger. |
+| FR-14 Breach and Escalation | E3 | E5 | Same reason: breach is derived, never stored. E3 decides *that* a job breached; E5 decides *who hears about it*. |
+| FR-18 Open Request views | E3 | E6 | The open and unassigned queues are the dispatch surface a supervisor works from. E6's dashboards read the same data but are specified under FR-69. |
+| FR-60 Push notification | E4 | E5 | The PRD groups push inside the mobile foundation (FR-58–FR-64), and device registration and receipt are client work. E5 owns the routing that decides what gets sent (AD-8). |
+
+### Dependency order within R1
+
+```mermaid
+graph LR
+  E1[E1 Foundation] --> E3[E3 Dispatch]
+  E1 --> E2[E2 Jazz Core]
+  E2 --> E3
+  E3 --> E4[E4 Handset]
+  E3 --> E5[E5 Escalation]
+  E4 --> E6[E6 Visibility]
+  E5 --> E6
+```
+
+E1 and E2 can run in parallel from week one. E2 is sequenced early despite being the least visible, because it carries the plan's only external dependency and the R1 demo has no spine without it.
+

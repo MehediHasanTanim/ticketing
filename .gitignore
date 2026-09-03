@@ -4,5 +4,3 @@ dist/
 *.log
 .dart_tool/
 clients/console/dist/
-_to_delete/
-.DS_Store
