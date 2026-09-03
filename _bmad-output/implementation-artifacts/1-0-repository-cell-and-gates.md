@@ -1,6 +1,6 @@
 # Story 1.0: Stand up the repository, the first cell, and the three gates
 
-Status: ready-for-dev
+Status: review
 
 <!-- Created by bmad-create-story 2026-09-02. Sources: planning-artifacts/epics.md (Epic 1), architecture/architecture-JazzTicketing-2026-09-02/ARCHITECTURE-SPINE.md, prds/prd-JazzTicketing-2026-08-29/prd.md, ux-designs/ux-JazzTicketing-2026-08-29/DESIGN.md. No previous story exists; no git history; greenfield repository. -->
 
@@ -173,14 +173,134 @@ Do not paper over a divergence. If a named library is deprecated or has been sup
 
 ### Agent Model Used
 
-_(to be filled by the dev agent)_
+`claude-opus-5` (the serving model may differ; see the session's model-identity note).
 
 ### Debug Log References
 
+Built and verified in the cloud workspace against **PostgreSQL 16.13** and
+**Redis 7.0.15**, then delivered to the project folder and re-verified there
+(`npm ci`, `tsc`, boundary gate, drift gate, TypeScript fixture half, unit tests -
+all green on the device). Cell teardown-and-rebuild was done from a clean
+`git clone` against an empty database.
+
 ### Completion Notes List
 
-- [ ] Three gate negative controls recorded (AC-6): isolation, sla-fixtures, codegen-drift each shown red against a broken fixture.
-- [ ] Confirmed stack versions recorded, with divergences from the spine reported to Tanim (AC-7).
-- [ ] Cell torn down and rebuilt from a clean checkout with no manual step (AC-5).
+- [x] **AC-1 source tree and inward dependencies.** Tree per the spine's Structural
+  Seed. `dependency-cruiser` enforces five rules: `core/` may not import
+  `adapters|app|edge|clients`; **`core/` may not import any npm package at all**
+  (which is why ULID is 20 lines in `core/src/ids.ts` rather than a dependency);
+  adapters never know each other; `adapters/` may not import `app|edge`; `app/` may
+  not import `edge/`. Result: *no dependency violations found (29 modules, 58
+  dependencies cruised)*.
+- [x] **AC-2 codegen drift.** `contracts/` holds OpenAPI 3.1, an event schema, the
+  error envelope, locale keys and the SLA vectors. Four TypeScript bindings are
+  generated and committed. The gate also refuses hand-written wire types outside
+  `contracts/generated/`.
+- [x] **AC-3 partially - TypeScript half only.** The fold is in `core/src/job/sla.ts`
+  (trivial elapsed case, `SLA_FOLD_VERSION = 1`), the single permitted Dart port in
+  `clients/mobile/lib/sla/sla_fold.dart`, and seven language-neutral vectors in
+  `contracts/sla-fixtures/vectors.json`. **TypeScript: 7/7 pass. The Dart half has
+  never executed** - see *Not done* below.
+- [x] **AC-4 cross-tenant isolation.** Ten assertions across all five public
+  interfaces (read by id, list, search, export, crafted call with A's session and
+  B's id), plus unauthenticated and forged-token cases. Backed by **Postgres
+  row-level security** with the scope pinned per transaction via
+  `set_config(..., is_local => true)`, so a pooled connection cannot leak one
+  request's scope into the next and a future forgotten `WHERE` clause returns
+  nothing. `cell.events` is **append-only for the application role** - `UPDATE` and
+  `DELETE` are revoked and the test proves both are refused.
+- [x] **AC-5 one reproducible cell.** API + Postgres event store + projections +
+  Redis. Migrations applied from source (3 files, no manual SQL). Smoke test covers
+  health, a command returning the accepted event, the projection read, AD-7
+  idempotency on a repeated `clientKey`, the error envelope, the fold over HTTP, and
+  a **projection rebuild that reproduces byte-identical state** (6 rows from 6
+  events in 16ms). Control-plane guest-data assertion green. **Rebuilt from a clean
+  clone against an empty database with no manual step: 29/29 tests pass.**
+- [x] **AC-6 negative controls - and one of them found a real bug.** Six of seven
+  controls confirmed their gate goes red. The drift-gate control initially reported
+  **"stayed GREEN while broken"**: the first version ran codegen *before* diffing
+  with git, which silently destroyed the hand-edit it was meant to catch. Rewritten
+  to snapshot committed content in memory first, needing no git state at all. This
+  is the entire argument for AC-6 - a gate that has never gone red is not known to
+  work, and this one was not.
+- [x] **AC-7 versions checked, not assumed.** Full table in `docs/stack-versions.md`.
+
+**Negative control output (final run):**
+
+```
+1. boundary lint: make core/ import an adapter        -> ok, went RED
+2. codegen drift: hand-edit a generated binding       -> ok, went RED
+3. SLA fixtures: break the TypeScript fold            -> ok, went RED
+4. SLA fixtures: break the Dart port                  -> UNVERIFIED (no SDK; vacuous)
+5. isolation: disable row-level security              -> ok, went RED
+6. control plane: add a guest-identifying column      -> ok, went RED
+7. directional lint: add a physical CSS property      -> ok, went RED
+negative controls: 6 correctly went red, 0 did not, 1 unverifiable here
+```
+
+**AC-7 findings - three divergences from the spine, reported not adopted silently:**
+
+| Component | Spine `[ASSUMPTION]` | Actually current | Pinned | Note |
+|---|---|---|---|---|
+| TypeScript | 5.x | **7.0.2** | 5.9.3 | TS 7 release notes unreadable (web blocked). Tanim's call. |
+| NestJS | 10.x | **12.0.1** | *not adopted* | Framework decision deferred - `docs/decisions/0001`. |
+| React | 18 | **19.2.8** | 19.2.8 | Adopted; console builds on it. |
+| Node | 22 LTS | 22.22.2 | 22 | Confirmed. |
+| PostgreSQL | 16.x | 16.13 | 16 | Confirmed, running. |
+| Redis | 7.x | 7.0.15 | 7 | Confirmed, running. |
+| Flutter / Dart / Drift | 3.2x / 3.x | **unverified** | - | `storage.googleapis.com` and `pub.dev` both blocked. |
+
+### Not done, and why - a reviewer must accept or reject these
+
+1. **The Dart half of AD-14's gate has never run.** The Dart SDK download returns
+   403 in this environment and `pub.dev` is unreachable. The port, the fixture
+   runner and the CI job (`dart-lang/setup-dart`) are all written, and the gate
+   **correctly fails** when Dart is absent rather than skipping - which is what AC-3
+   specifies. But "both implementations agree" is unproven until it runs on a
+   machine with a Dart SDK. **First thing to check on a networked runner.**
+2. **T6's Flutter scaffold is not built.** Same blocker. `clients/mobile/` holds the
+   fold, the fixture runner and a `pubspec.yaml` with an `[UNVERIFIED]` SDK
+   constraint. The Drift-backed queue and the localisation scaffold belong to
+   Stories 4.1-4.8 anyway; what is missing from *this* story is the app skeleton and
+   the analyzer rule banning `EdgeInsets.only(left:)`. The equivalent console lint
+   **is** in place and passing, and its negative control is green.
+3. **The HTTP framework is deliberately unchosen.** `edge/src/server.ts` routes with
+   `node:http` in ~40 lines. Rationale in `docs/decisions/0001-http-framework-deferred.md`:
+   Story 1.0's ACs name no framework, NestJS is two majors ahead of the spine's
+   assumption, and its release notes cannot be read here. Nothing in `core/`, `app/`
+   or `adapters/` depends on the answer.
+4. **The fixture auth stub is behind `FIXTURE_AUTH=1`** and defaults to off. Story
+   1.5 removes its production path, as that story's notes require.
 
 ### File List
+
+**78 source files** (excluding `_bmad*`, `node_modules`, `dist`), committed as
+`ecc3dd2` in the project repository.
+
+- `package.json`, `tsconfig.json`, `vitest.config.mts`, `.dependency-cruiser.cjs`,
+  `.env.example`, `.gitignore`, `README.md`
+- `contracts/` - `openapi.yaml`, `errors/envelope.json`,
+  `events/fixture-note-recorded.json`, `locale/{en,ar}.json`,
+  `sla-fixtures/vectors.json`, `conflict-rules/README.md`, `scripts/gen-ts.mjs`,
+  `generated/ts/{api,errors,locale-keys,sla-fixtures}.ts`
+- `core/src/` - `tenancy.ts`, `events.ts`, `ids.ts`, `index.ts`,
+  `job/{sla,index}.ts`, `fixture/note.ts`,
+  `ports/{clock,event-store,read-model,jazzcore,notification,index}.ts`
+- `adapters/src/` - `postgres/{config,pool,event-store,fixture-note-read-model}.ts`,
+  `cache/redis-probe.ts`, `jazzcore/README.md`, `push/README.md`
+- `app/src/` - `clock.ts`, `record-fixture-note.ts`, `rebuild-projections.ts`
+- `edge/src/` - `server.ts`, `auth.ts`, `errors.ts`, `main.ts`
+- `ops/` - `migrate.ts`, `migrations/00{1,2,3}_*.sql`
+- `clients/mobile/` - `pubspec.yaml`, `lib/sla/sla_fold.dart`,
+  `bin/sla_fixtures.dart`, `README.md`
+- `clients/console/` - `package.json`, `index.html`, `vite.config.ts`,
+  `tsconfig.json`, `src/{main.tsx,tokens.css}`,
+  `scripts/lint-logical-direction.mjs`
+- `tests/` - `harness.ts`, `isolation.test.ts`, `control-plane.test.ts`,
+  `smoke.test.ts`, `unit/sla.test.ts`
+- `scripts/` - `gate-codegen-drift.mjs`, `gate-sla-fixtures.mjs`,
+  `run-ts-fixtures.ts`, `negative-controls.sh`
+- `.github/workflows/ci.yml` - five jobs, each able to fail the build alone
+- `docs/` - `stack-versions.md`, `decisions/0001-http-framework-deferred.md`
+
+**Test totals:** 29 passing (10 isolation, 6 smoke, 2 control-plane, 11 unit).
