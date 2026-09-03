@@ -53,3 +53,26 @@ tests passed because vitest resolved the aliases itself. **The built artifact ha
 never been executed.** Fixed by using relative imports, and `npm run
 gate:built-artifact` now runs `dist` and asserts it serves and drains, so the class
 of bug cannot return without CI or Docker.
+
+## What the first real-base build on a developer machine found
+
+Tanim ran `docker compose up -d --wait` on an M4 Pro Mac, 2026-09-03. **Both images
+built cleanly on the real `node:22-alpine` and `nginx:1.27-alpine`** - `npm ci`, the
+directional lint, `tsc -b` and `vite build` all succeeded on musl, which was the
+risk flagged above. The rolldown musl binding resolved from the lockfile as hoped.
+
+One failure, and it was a compose defect rather than an image one:
+
+```
+target migrate: failed to solve: image "docker.io/jazzticketing/api:dev": already exists
+```
+
+`api` and `migrate` both declared `build:` **and** the same `image:` tag, so bake
+built both targets in parallel and they raced to export the same tag. Fixed: `api`
+builds, `migrate` references with `pull_policy: never`. `gate:containers` now fails
+that arrangement, with a negative control.
+
+**Why nothing caught it earlier:** the race only fires when the tag is not already
+in the local image store. Every run in this sandbox built `api` first and by hand,
+so the tag always existed. A clean machine was the only thing that could surface it -
+which is the same lesson as the path aliases and, before that, the drift gate.

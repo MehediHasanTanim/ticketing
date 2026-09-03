@@ -1,3 +1,7 @@
+# check=skip=SecretsUsedInArgOrEnv
+# ^ FIXTURE_AUTH is a boolean feature flag, not a secret. Defaulting it to 0 in
+#   the image is a safety property worth keeping visible, so the rule is skipped
+#   rather than the variable renamed to dodge a name-pattern heuristic.
 # NO `# syntax=` DIRECTIVE, DELIBERATELY. Pinning the Dockerfile frontend makes
 # every build depend on pulling docker/dockerfile from Docker Hub, and this file
 # uses no frontend-version-specific syntax (no heredocs, no RUN --mount). Paying a

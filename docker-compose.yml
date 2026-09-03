@@ -53,13 +53,18 @@ services:
       timeout: 3s
       retries: 12
 
-  # One-shot. Same image as the API, so migrations can never be applied from a
-  # different build than the code that reads them.
+  # One-shot, running the SAME image as the api, so migrations can never be applied
+  # from a different build than the code that will read them.
+  #
+  # It deliberately has NO `build:` section. Two services that both build and both
+  # tag the same image race in Compose's bake phase and one of them dies with
+  # `image "jazzticketing/api:dev": already exists`. One builder, everyone else
+  # references. `pull_policy: never` stops Compose trying to pull a tag that only
+  # ever exists locally - the api service's build is what produces it, and Compose
+  # completes every build before starting any container.
   migrate:
-    build:
-      context: .
-      target: runtime
     image: jazzticketing/api:dev
+    pull_policy: never
     command: ["node", "dist/ops/migrate.js"]
     environment:
       DATABASE_URL_ADMIN: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-jazzticketing}

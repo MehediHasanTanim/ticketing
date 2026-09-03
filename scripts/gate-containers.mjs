@@ -155,6 +155,35 @@ if (cfg) {
   }
   ok('compose: no host bind mounts');
 
+  // Two services that both BUILD and both tag the same image race in Compose's
+  // bake phase, and one dies with `image "...": already exists`. One builder,
+  // everyone else references it. Found the hard way on Tanim's Mac, 2026-09-03 -
+  // it does not reproduce where the image is already in the local store, which is
+  // why it survived every check until a clean machine ran it.
+  const builders = new Map();
+  for (const [name, s] of Object.entries(svc)) {
+    if (!s.build || typeof s.image !== 'string') continue;
+    if (!builders.has(s.image)) builders.set(s.image, []);
+    builders.get(s.image).push(name);
+  }
+  const racing = [...builders.entries()].filter(([, names]) => names.length > 1);
+  if (racing.length) {
+    for (const [image, names] of racing) {
+      bad(`compose: ${names.join(' and ')} both build and both tag ${image} - they will race; give one the build and the others \`image\` + \`pull_policy: never\``);
+    }
+  } else {
+    ok('compose: no two services build the same image tag');
+  }
+
+  // A service that references a locally-built tag must not try to pull it.
+  for (const [name, s] of Object.entries(svc)) {
+    if (s.build || typeof s.image !== 'string') continue;
+    const builtLocally = [...builders.keys()].includes(s.image);
+    if (builtLocally && s.pull_policy !== 'never') {
+      bad(`compose: ${name} references the locally-built ${s.image} but has no \`pull_policy: never\` - Compose will try to pull a tag that exists only on this machine`);
+    }
+  }
+
   // Every published host port must be an override with a default, never a bare
   // number. A hard-coded host port is a merge conflict waiting to happen on any
   // machine that already runs Postgres - which is exactly how this rule arrived.

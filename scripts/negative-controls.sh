@@ -107,6 +107,23 @@ expect_red "built artifact runs (AC-5)" node scripts/gate-built-artifact.mjs
 cp /tmp/server.alias.bak edge/src/server.ts
 cp /tmp/tsconfig.alias.bak tsconfig.json
 
+echo "== 12. container gate: make two services build the same image tag =="
+cp docker-compose.yml /tmp/compose.race.bak
+python3 - <<'PY'
+import pathlib
+p=pathlib.Path('docker-compose.yml'); t=p.read_text()
+t=t.replace("""  migrate:
+    image: jazzticketing/api:dev
+    pull_policy: never""","""  migrate:
+    build:
+      context: .
+      target: runtime
+    image: jazzticketing/api:dev""")
+p.write_text(t)
+PY
+expect_red "container gate, no image-tag race (AC-5)" node scripts/gate-containers.mjs
+cp /tmp/compose.race.bak docker-compose.yml
+
 echo
 echo "negative controls: ${pass} correctly went red, ${fail} did not, ${unverified} unverifiable here"
 [ "${fail}" -eq 0 ]

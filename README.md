@@ -90,7 +90,11 @@ Two decisions worth knowing:
 
 - **The API image also runs the migrations** (`node dist/ops/migrate.js`) and the
   projection rebuild. Same image, same build - so a deploy can never apply
-  migrations from a different build than the code that will read them.
+  migrations from a different build than the code that will read them. Only the
+  `api` service **builds** it; `migrate` references the tag with
+  `pull_policy: never`. Two services that both build and both tag one image race in
+  Compose's bake phase and one dies with `already exists` - `gate:containers`
+  rejects that arrangement now.
 - **The console image is environment-agnostic.** The API URL is not baked in; the
   entrypoint writes `/config.json` from environment at container start and the app
   fetches it. One image, many environments.
