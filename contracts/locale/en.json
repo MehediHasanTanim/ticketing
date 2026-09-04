@@ -4,6 +4,10 @@
   "error.not_found": "Not found.",
   "error.validation_failed": "Check the highlighted fields.",
   "error.upstream_unavailable": "Jazz Core is unavailable. Your work is saved.",
+  "error.too_many_attempts": "Too many attempts. Wait a moment and try again.",
+  "error.not_implemented": "This is not built yet.",
+  "error.conflict": "This changed while you were working. Review it and try again.",
+  "error.internal": "Something went wrong on our side. Try again in a moment.",
   "health.ok": "Healthy",
   "health.degraded": "Degraded"
 }

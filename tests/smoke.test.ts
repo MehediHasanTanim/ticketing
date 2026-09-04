@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { start, auth, type Harness } from './harness';
 import { rebuildProjections } from '../app/src/rebuild-projections';
+import { OPENAPI_DOCUMENT } from '../contracts/generated/ts/openapi';
 
 /**
  * AC-5: "it runs" has to be machine-checkable. Health plus one command all the way
@@ -116,12 +117,100 @@ describe('cell smoke test', () => {
     // "Try it out" teaches the reader the wrong thing about the API.
     expect(doc.components.securitySchemes).toHaveProperty('bearerAuth');
     expect(doc.security).toEqual([{ bearerAuth: [] }]);
+
+    // A CLOSED allowlist, asserted in both directions. Opting out of auth is a
+    // decision that needs a reason, and the reason belongs next to the name:
+    // health and docs carry no tenant data, and the four auth entry points are
+    // where a credential is OBTAINED - requiring one there would be circular.
+    // Adding a path to the spec with `security: []` and not to this list fails;
+    // so does listing a path here that no longer opts out.
+    const MAY_BE_PUBLIC = new Set([
+      '/health', '/openapi.json', '/docs',
+      '/auth/sso/start', '/auth/sso/callback', '/auth/device/sign-in', '/auth/token/refresh',
+    ]);
+    const actuallyPublic = new Set<string>();
     for (const [path, ops] of Object.entries(doc.paths as Record<string, Record<string, { security?: unknown[] }>>)) {
-      const isPublic = ['/health', '/openapi.json', '/docs'].includes(path);
       for (const op of Object.values(ops)) {
-        if (isPublic) expect(op.security, `${path} should be public`).toEqual([]);
-        else expect(op.security, `${path} must not opt out of auth`).toBeUndefined();
+        if (op.security === undefined) continue;
+        expect(op.security, `${path}: the only reason to set security is to opt out`).toEqual([]);
+        actuallyPublic.add(path);
+        expect(MAY_BE_PUBLIC.has(path), `${path} opts out of auth and is not on the allowlist`).toBe(true);
       }
+    }
+    expect([...actuallyPublic].sort()).toEqual([...MAY_BE_PUBLIC].sort());
+  });
+
+  it('is honest about what is designed but not built - every unbuilt operation 501s with its story', async () => {
+    // The auth surface is designed ahead of the stories that build it
+    // (docs/decisions/0002). The risk that creates is a spec that advertises an
+    // endpoint the server does not have, so the flag and the runtime are checked
+    // against each other rather than trusted separately.
+    const doc = OPENAPI_DOCUMENT as unknown as {
+      paths: Record<string, Record<string, { 'x-implemented'?: boolean; 'x-story'?: string }>>;
+    };
+    const unbuilt: Array<{ method: string; path: string; story?: string }> = [];
+    for (const [path, ops] of Object.entries(doc.paths)) {
+      for (const [method, op] of Object.entries(ops)) {
+        if (op['x-implemented'] === false) unbuilt.push({ method, path, story: op['x-story'] });
+      }
+    }
+    // The nine auth operations, and nothing else - a Story 1.0 operation marked
+    // unbuilt would mean something shipped that the spec says does not exist.
+    expect(unbuilt).toHaveLength(9);
+    expect(unbuilt.every((o) => o.path.startsWith('/auth/'))).toBe(true);
+
+    // And the converse, which is the assertion that actually bites: an operation
+    // NOT marked unbuilt has to be reachable. Flipping `x-implemented` to true
+    // without writing the handler stops the stub answering, and the path then
+    // falls through to 404 - so a story cannot mark its work done by editing the
+    // spec. Limited to parameterless reads, which need no fixture data to exist.
+    for (const [path, ops] of Object.entries(doc.paths)) {
+      if (path.includes('{')) continue;
+      const op = ops['get'] as { 'x-implemented'?: boolean } | undefined;
+      if (!op || op['x-implemented'] === false) continue;
+      const res = await fetch(`${h.base}/v1${path}`, { headers: auth(h.tokenA) });
+      expect([404, 501], `GET ${path} is documented as built but is not there`)
+        .not.toContain(res.status);
+    }
+
+    for (const { method, path, story } of unbuilt) {
+      // An unowned designed-ahead operation is a spec defect: nobody is going to
+      // build it, and nothing will ever remove the stub.
+      expect(story, `${method} ${path} has no x-story`).toMatch(/^\d+\.\d+$/);
+
+      const url = `${h.base}/v1${path.replace(/\{[^}]+\}/g, 'fixture-id')}`;
+      // Both with and without a credential, and the answer is the same: the
+      // operation does not exist yet. A 401 here would send the reader looking for
+      // a token that was never the problem.
+      for (const headers of [undefined, auth(h.tokenA)]) {
+        const res = await fetch(url, { method: method.toUpperCase(), ...(headers ? { headers } : {}) });
+        expect(res.status, `${method} ${path}`).toBe(501);
+        const body = await res.json() as { code: string; messageKey: string; retryable: boolean; details?: { story?: string } };
+        expect(body.code).toBe('not_implemented');
+        expect(body.messageKey).toBe('error.not_implemented');
+        // Retrying does not build the feature.
+        expect(body.retryable).toBe(false);
+        expect(body.details?.story, `${method} ${path} must name its owner`).toBe(story);
+      }
+    }
+  });
+
+  it('does not 501 a path that merely resembles an unbuilt one', async () => {
+    // `/auth/sessions/{sessionId}` is a DELETE. The matcher must not swallow the
+    // sibling collection, a different method, or a deeper path.
+    // 404, not 501: these are not documented operations, so they are not
+    // "designed and pending" - they are simply absent, and saying otherwise would
+    // promise a reader that something is coming.
+    const cases: Array<[string, string, number]> = [
+      ['GET', '/v1/auth/sessions/some-id', 404],  // only DELETE is documented on the item
+      ['DELETE', '/v1/auth/sessions', 404],       // only GET is documented on the collection
+      ['GET', '/v1/auth/sessions/a/b', 404],      // deeper than the template
+      ['GET', '/v1/auth/sessions', 501],          // ...while the documented one still 501s
+      ['GET', '/v1/fixture-notes', 200],          // and a real, built route still works
+    ];
+    for (const [method, path, expected] of cases) {
+      const res = await fetch(`${h.base}${path}`, { method, headers: auth(h.tokenA) });
+      expect(res.status, `${method} ${path}`).toBe(expected);
     }
   });
 

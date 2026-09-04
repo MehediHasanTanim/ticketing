@@ -39,6 +39,17 @@ So that a handset left in a corridor is not a data-protection incident.
 
 **Prerequisites:** 4.1, 4.3, 4.5 (pending photos are part of what must be handled).
 
+**The wire contract already exists.** `GET /auth/sessions` and
+`DELETE /auth/sessions/{sessionId}` are designed in `contracts/openapi.yaml`, marked
+`x-story: "4.8"` / `x-implemented: false`, and today answer 501 `not_implemented` (see
+`docs/decisions/0002`). This story implements them and flips both flags. The revocation
+returns **202, not 204**, deliberately: the server has accepted the revocation, it has not
+confirmed the device acted on it — which is T3's "at next contact" stated in the status
+code instead of only in prose. The session list carries a device label and a Staff Member
+id and never a guest name or Stay context (DG-1). Whether this listing is an
+administrator surface or an audit read is **not settled by any FR** — FR-64 only implies
+it; raise it rather than assuming.
+
 **Scope guards.** On-device data protection. Not authentication (4.1), not server-side session policy beyond the remote-signout hook.
 
 **The distinction in T1 is the whole story.** Sign-out must clear what belongs to the guest and keep what belongs to the worker. Clearing everything loses an attendant's queued completions — the failure 4.3 exists to prevent. Clearing nothing leaves a handset in a corridor holding guest names, which is a data-protection incident under DG-1. Implement the split by **classifying local tables**, not by hoping the wipe list is complete.

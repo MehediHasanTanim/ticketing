@@ -9,6 +9,7 @@ import { foldSla } from '../../core/src/job';
 import { ValidationError } from '../../core/src/fixture/note';
 import { resolvePrincipal, type Principal } from './auth';
 import { docsEnabled, serveDocsAsset, serveDocsPage, serveOpenApiDocument } from './docs';
+import { unimplementedStory } from './not-implemented';
 import { envelope, statusFor, type ErrorCode } from './errors';
 
 /**
@@ -136,6 +137,14 @@ export function createApp(): Server {
         const asset = /^\/v1\/docs\/assets\/(.*)$/.exec(url.pathname);
         if (asset) return serveDocsAsset(decodeURIComponent(asset[1] ?? ''), req, res);
       }
+
+      // ---- documented, not built yet ----
+      // Answered before tenancy resolution: four of these operations are how a
+      // caller GETS a credential, so demanding one to be told the operation does
+      // not exist would be circular. The set is derived from the OpenAPI document,
+      // so it retires itself story by story - see not-implemented.ts.
+      const story = unimplementedStory(req, url.pathname);
+      if (story) return fail(res, 'not_implemented', { story });
 
       // ---- tenancy resolution: the one boundary (AD-3) ----
       const principal = resolvePrincipal(req.headers.authorization);

@@ -18,7 +18,9 @@
         "not_found",
         "validation_failed",
         "conflict",
+        "too_many_attempts",
         "upstream_unavailable",
+        "not_implemented",
         "internal"
       ]
     },

@@ -43,7 +43,18 @@ async function main(): Promise<void> {
     // here - never committed, never in an image layer.
     const appPassword = process.env.APP_DB_PASSWORD;
     if (appPassword && appPassword.length > 0) {
-      await client.query(`ALTER ROLE jt_app WITH PASSWORD $1`, [appPassword]);
+      // ALTER ROLE is a utility statement, and Postgres does not accept bind
+      // parameters in one - `PASSWORD $1` is a syntax error, not a slow path. This
+      // was written as a parameterised query and never ran: compose and CI both
+      // leave APP_DB_PASSWORD empty, so the branch was skipped everywhere it was
+      // exercised and would have failed on the FIRST real deploy, which is the one
+      // environment where the secret store supplies a value. Found while verifying
+      // the auth contract (2026-09-04).
+      //
+      // A literal is therefore the only option, so it is escaped by the driver
+      // (`escapeLiteral` emits an E'' string with quotes and backslashes handled)
+      // rather than by string concatenation here. The value is never logged.
+      await client.query(`ALTER ROLE jt_app WITH PASSWORD ${client.escapeLiteral(appPassword)}`);
       console.log('application role password set from APP_DB_PASSWORD');
     } else {
       console.log('APP_DB_PASSWORD not set - leaving the local development password in place');

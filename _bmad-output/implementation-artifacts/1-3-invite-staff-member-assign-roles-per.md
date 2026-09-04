@@ -52,6 +52,18 @@ So that what they can see and act on is decided before they ever sign in.
 
 **Prerequisites:** 1.1, 1.2. Consumed by 4.1 (which uses the PIN credential this story creates).
 
+**The wire contract already exists.** `GET /auth/session` and `POST /auth/context` are
+designed in `contracts/openapi.yaml`, marked `x-story: "1.3"` / `x-implemented: false`,
+and today answer 501 `not_implemented` (see `docs/decisions/0002`). This story implements
+them and flips both flags — and flipping a flag without a handler behind it turns the
+smoke suite red, so the flag cannot be used to mark the work done. `/auth/session` IS the
+single decision point T4 asks for; its `permissions` array is the server's answer that the
+interface renders from. Two decisions recorded there are binding: a context switch **mints
+a new token** rather than reinterpreting the old one (AD-3), and a `propertyId` in another
+Tenant answers `not_found`, never `forbidden`, so the response cannot be used to discover
+that a Property exists elsewhere. A shape that needs to change is a change to
+`contracts/` first, exactly as a criterion that needs to change is a change to epics.md.
+
 **Scope guards.** Individual invitation and role assignment only. Bulk import is 1.10. Custom role definition is 1.4. SSO is 1.5. Do not build a role **editor** here — assignment picks from existing roles.
 
 **Implementation notes.**

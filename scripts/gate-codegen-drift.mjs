@@ -76,4 +76,39 @@ if (offenders.length) {
   console.log('  codegen-drift  PASS  no hand-written wire types outside contracts/generated');
 }
 
+// 3. Every declared error code has a message in EVERY language.
+//    contracts/ is one contract, not several: an envelope code with no
+//    `error.<code>` key renders a BLANK label at the moment something has already
+//    gone wrong. This check was added with the auth contract, and it immediately
+//    found `conflict` and `internal` untranslated in both languages - declared
+//    since Story 1.0 and never rendered because nothing had raised them yet.
+{
+  const env = JSON.parse(readFileSync(join('contracts', 'errors', 'envelope.json'), 'utf8'));
+  const codes = env.properties.code.enum;
+  const locales = readdirSync(join('contracts', 'locale')).filter((f) => f.endsWith('.json'));
+  const gaps = [];
+  const keysets = new Map();
+  for (const f of locales) {
+    const dict = JSON.parse(readFileSync(join('contracts', 'locale', f), 'utf8'));
+    keysets.set(f, Object.keys(dict).sort().join(','));
+    for (const code of codes) {
+      const key = `error.${code}`;
+      if (!dict[key]) gaps.push(`${f}: missing ${key}`);
+    }
+  }
+  // And the languages agree on their key set, so a key added in English cannot
+  // silently ship untranslated (AD-12: Arabic is a release language, not a later port).
+  const distinct = new Set(keysets.values());
+  if (distinct.size > 1) {
+    for (const [f, keys] of keysets) gaps.push(`${f}: key set differs (${keys.split(',').length} keys)`);
+  }
+  if (gaps.length) {
+    failed = true;
+    console.log('  codegen-drift  FAIL  localisation contract incomplete:');
+    for (const g of gaps) console.log(`                       ${g}`);
+  } else {
+    console.log(`  codegen-drift  PASS  ${codes.length} error codes translated in ${locales.length} languages`);
+  }
+}
+
 process.exit(failed ? 1 : 0);

@@ -4,6 +4,10 @@
   "error.not_found": "غير موجود.",
   "error.validation_failed": "تحقق من الحقول المميزة.",
   "error.upstream_unavailable": "خدمة Jazz Core غير متوفرة. تم حفظ عملك.",
+  "error.too_many_attempts": "محاولات كثيرة. انتظر قليلاً وأعد المحاولة.",
+  "error.not_implemented": "غير متوفر بعد.",
+  "error.conflict": "تغيّر هذا أثناء عملك. راجعه وأعد المحاولة.",
+  "error.internal": "حدث خطأ لدينا. أعد المحاولة بعد قليل.",
   "health.ok": "سليم",
   "health.degraded": "متدهور"
 }

@@ -136,6 +136,59 @@ PY
 expect_red "container gate, nginx pid path (AC-5)" node scripts/gate-containers.mjs
 cp /tmp/console.pid.bak clients/console/Dockerfile
 
+echo "== 14. auth contract: mark a designed-ahead operation as built, with no handler =="
+# The whole risk of designing the auth surface ahead of the four stories that build
+# it: a spec that claims an endpoint exists when nothing serves it. Flipping the
+# flag must not be a way to mark work done.
+cp contracts/openapi.yaml /tmp/openapi.nc.bak
+python3 - <<'PY2'
+import pathlib
+p = pathlib.Path('contracts/openapi.yaml'); t = p.read_text()
+p.write_text(t.replace('      x-story: "1.3"\n      x-implemented: false',
+                       '      x-story: "1.3"\n      x-implemented: true', 1))
+PY2
+npm run --silent codegen >/dev/null 2>&1
+expect_red "auth contract, unbuilt operation claimed built" npm run --silent smoke
+cp /tmp/openapi.nc.bak contracts/openapi.yaml
+
+echo "== 15. auth contract: designed-ahead operation with no owning story =="
+# An unowned stub is one nobody will ever remove.
+python3 - <<'PY2'
+import pathlib
+p = pathlib.Path('contracts/openapi.yaml'); t = p.read_text()
+p.write_text(t.replace('      operationId: signInOnSharedDevice\n      tags: [auth]\n      x-story: "4.1"\n',
+                       '      operationId: signInOnSharedDevice\n      tags: [auth]\n', 1))
+PY2
+npm run --silent codegen >/dev/null 2>&1
+expect_red "auth contract, operation with no x-story" npm run --silent smoke
+cp /tmp/openapi.nc.bak contracts/openapi.yaml
+
+echo "== 16. auth contract: let an authenticated operation quietly opt out of auth =="
+python3 - <<'PY2'
+import pathlib
+p = pathlib.Path('contracts/openapi.yaml'); t = p.read_text()
+p.write_text(t.replace('      operationId: previewSla\n      tags: [sla]',
+                       '      operationId: previewSla\n      tags: [sla]\n      security: []', 1))
+PY2
+npm run --silent codegen >/dev/null 2>&1
+expect_red "auth contract, unlisted public operation" npm run --silent smoke
+cp /tmp/openapi.nc.bak contracts/openapi.yaml
+npm run --silent codegen >/dev/null 2>&1
+
+echo "== 17. localisation contract: an error code with no Arabic message =="
+# Arabic is a release language, not a later port (AD-12). A code with no message
+# renders a BLANK label at the moment something has already gone wrong.
+cp contracts/locale/ar.json /tmp/ar.nc.bak
+python3 - <<'PY2'
+import json
+p = 'contracts/locale/ar.json'
+d = json.load(open(p)); d.pop('error.too_many_attempts', None)
+open(p, 'w', encoding='utf8').write(json.dumps(d, ensure_ascii=False, indent=2) + "\n")
+PY2
+expect_red "localisation contract, untranslated error code" node scripts/gate-codegen-drift.mjs
+cp /tmp/ar.nc.bak contracts/locale/ar.json
+npm run --silent codegen >/dev/null 2>&1
+
 echo
 echo "negative controls: ${pass} correctly went red, ${fail} did not, ${unverified} unverifiable here"
 [ "${fail}" -eq 0 ]

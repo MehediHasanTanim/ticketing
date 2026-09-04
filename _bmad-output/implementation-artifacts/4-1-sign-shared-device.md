@@ -43,6 +43,17 @@ So that starting a shift is not a login problem.
 
 **Prerequisites:** 1.3 (PIN credential), 1.5 (so the auth stub is gone), 1.0 (Flutter scaffold with Drift). **Prerequisite for 3.9, 4.2 onward, and all of Epic 7's mobile flows.**
 
+**The wire contract already exists.** `POST /auth/device/sign-in` and `POST /auth/sign-out`
+are designed in `contracts/openapi.yaml`, marked `x-story: "4.1"` / `x-implemented: false`,
+and today answer 501 `not_implemented` (see `docs/decisions/0002`). This story implements
+them and flips both flags; flipping one without a handler behind it turns the smoke suite
+red. Three decisions recorded there are binding: PIN and badge sit behind **one credential
+abstraction** (`oneOf` with a `type` discriminator), a shared-device session gets **no
+refresh token** because it ends at the inactivity timeout rather than holding a long-lived
+credential on a handset left in a corridor, and `deviceId` is carried for session hygiene
+but is **not** part of the idempotency key. `staffRef` is a short Property-scoped
+reference, not an email address — a linen-room handset should not require typing one.
+
 **Scope guards.** Sign-in, sign-out, timeout and identity on a shared device. Not the queue (4.2), not offline mechanics (4.3), not data hygiene on sign-out (4.8 — closely related, deliberately separate).
 
 **BYOD is not a case to handle.** Devices are Property-issued Shared Devices; a personal handset in use is governed by the **same** shared-device rules, so the client never reasons about device ownership. Do not add an ownership branch.

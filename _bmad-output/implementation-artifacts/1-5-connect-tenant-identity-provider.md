@@ -39,6 +39,20 @@ So that corporate and management users authenticate through it rather than holdi
 
 **Prerequisites:** 1.1, 1.3. This story retires the last production use of Story 1.0's fixture auth stub for corporate users — **remove the stub's production path here**, leaving PIN sign-in (4.1) as the only other credential type.
 
+**The wire contract already exists.** `GET /auth/sso/start`, `POST /auth/sso/callback` and
+`POST /auth/token/refresh` are designed in `contracts/openapi.yaml`, marked
+`x-story: "1.5"` / `x-implemented: false`, and today answer 501 `not_implemented` (see
+`docs/decisions/0002`, which also carries the whole auth ownership table). This story
+implements them and flips those three flags; flipping one without a handler behind it
+turns the smoke suite red. Note where the refresh sits in AC-2: it is the place upstream
+state is re-checked, which is why access tokens are short-lived and why rotation is
+single-use.
+
+**Two open questions this story must settle, not inherit.** The PRD specifies neither
+**token lifetimes** — and the access-token lifetime IS the deprovisioning delay FR-3
+promises, so it is a product decision, not a tuning constant — nor a **PIN lockout policy**
+behind the documented 429. Raise both rather than picking a number in code.
+
 **Scope guards.** Connecting the provider and mapping an authenticated identity to an existing Staff Member. Not role definition (1.4), not Tenant defaults generally (1.6), not shared-device sign-in (4.1).
 
 **Implementation notes.**

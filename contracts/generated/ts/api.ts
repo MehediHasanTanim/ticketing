@@ -151,6 +151,186 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Who the caller is, where they are scoped, and what they may do.
+         * @description The single server-side permission decision point that the interface queries (AD-11, Story 1.3 T4). One place answers a permission question; two answers is how a hidden button becomes a security bug. Carries no guest data of any kind (DG-1) and no staff attribute beyond what a session needs.
+         */
+        get: operations["getSession"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Switch Property without signing out.
+         * @description A Staff Member holding roles at two Properties in one Tenant switches context and their permissions are RE-RESOLVED server-side for the new Property (Story 1.3 AC-3). Because every token carries `tenant_id` and `property_id` (AD-3), a switch MINTS A NEW TOKEN rather than reinterpreting the old one - a scope that a header can change is not a scope. The Tenant never changes: a `propertyId` in another Tenant answers `not_found`, not `forbidden`, so the response cannot be used to discover that a Property exists elsewhere. A Property in this Tenant where the caller holds no role answers `forbidden`.
+         */
+        post: operations["switchContext"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/sso/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Begin authentication at the Tenant's identity provider.
+         * @description Resolves the Tenant's SAML 2.0 / OIDC connection and redirects to it. The connection is per Tenant and never global (FR-3), so the Tenant has to be identified before a provider can be chosen; `tenantSlug` is a routing hint, not a credential. An unknown Tenant, and a Tenant with no provider configured, produce the SAME outcome as a rejected assertion - the response never reveals whether a Tenant exists or has SSO connected. `state` is opaque, single-use and bound to the callback. No token, client secret or assertion appears in this or any other query string.
+         */
+        get: operations["startSso"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/sso/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Exchange an OIDC code or a SAML assertion for a session.
+         * @description AUTHENTICATION IS NOT AUTHORISATION. Just-in-time provisioning is off by default (FR-83), so an identity that authenticates successfully but matches no provisioned Staff Member gets `forbidden` and NO SESSION - not a session holding an empty permission set, which every client would then have to remember to handle. A provider connected for Tenant A never authenticates a Tenant B user. The code and the assertion arrive in the body and are never logged.
+         */
+        post: operations["completeSso"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/token/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Exchange a refresh token for a new short-lived access token.
+         * @description This is the mechanism behind "access is lost at next token validation, without a manual step in JazzTicketing" (Story 1.5 AC-2): upstream state is re-checked HERE. Access tokens are therefore deliberately short-lived, and the refresh is where deprovisioning bites. A deprovisioned, disabled or revoked identity gets `unauthenticated` and the refresh token is burned. Rotation is single-use - presenting the same refresh token twice invalidates the whole session chain, because a replay means the token is no longer in only one place. Body, never a URL; never logged.
+         */
+        post: operations["refreshToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/device/sign-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign in on a Shared Device with a PIN or a badge.
+         * @description Under five seconds on the baseline device (Story 4.1 AC-1, NFR-5), with the Staff Member's configured language applied immediately (FR-61). The capability limit lives on the CREDENTIAL, not on the role: a session minted from a PIN or a badge is refused configuration and reporting scopes even when the Staff Member also holds an administrator role (FR-4, Story 1.3 T2), so a PIN-holding administrator is not a hole. Every rejection - unknown staff reference, wrong PIN, disabled credential, unregistered device - returns one generic failure, so the sign-in screen cannot be used to enumerate staff. Rate-limited per device and per staff reference.
+         */
+        post: operations["signInOnSharedDevice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/sign-out": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End this session on this device.
+         * @description Revokes THIS session and nothing else. Queued offline actions belonging to the signing-out Staff Member survive and later sync under their identity (Story 4.1 AC-2 and AC-4, AD-7) - sign-out is not a wipe, and idempotency is keyed to `(tenant_id, property_id, staff_member_id, client_key)`, so the next person on the handset cannot collide with the last. What must LEAVE the device on sign-out is guest context, and that is Story 4.8.
+         */
+        post: operations["signOut"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Sessions currently open on this Property's devices.
+         * @description Device and session hygiene (FR-64): an administrator can see which handsets hold a live session in order to end one. Scoped to the caller's Property. It carries a device label and a Staff Member id and never a guest name or Stay context (DG-1).
+         */
+        get: operations["listDeviceSessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/sessions/{sessionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remote sign-out for one device session.
+         * @description The session is marked invalid immediately; the device learns AT NEXT CONTACT (Story 4.8 AC-3). A handset offline for a shift stays signed in - the connectivity model cannot deliver a stronger guarantee and the story accepts that. Hence 202 and not 204: the server has accepted the revocation, it has not confirmed the device acted on it. Reporting otherwise would be the more comfortable lie.
+         */
+        delete: operations["revokeDeviceSession"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -216,10 +396,124 @@ export interface components {
             breached: boolean;
             foldVersion: number;
         };
+        /** @description What the server has DECIDED about this caller. No guest data (DG-1), and no staff attribute beyond what a session needs - staff data is governed by DG-5, so no payroll identifier and no date of birth appears here or is accepted from any caller. */
+        Session: {
+            /** @description ULID. Identifies this session for remote sign-out (FR-64). */
+            sessionId: string;
+            staffMemberId: string;
+            /** @description The Staff Member's own name. Never a guest name. */
+            displayName?: string;
+            tenantId: string;
+            /** @description The Property this session is scoped to right now. Changing it mints a new token (AD-3); it is never changed by a header. */
+            propertyId: string;
+            /**
+             * @description What the caller signed in WITH, not what role they hold. Capability differences live here so that adding a third credential type later does not mean revisiting every permission check (Story 1.3 T2, FR-4).
+             * @enum {string}
+             */
+            credentialType: "sso" | "pin" | "badge";
+            /** @description BCP 47. Applied at sign-in and reverted for the next person on a Shared Device (FR-61, AD-12) - locale is session state, not app state. */
+            languageTag: string;
+            /** @description The server's answer, re-resolved for the current Property on every request. The interface only hides what the server would refuse; it never decides (AD-11). A client that caches this across a context switch is wrong. */
+            permissions: string[];
+            /** @description Properties this Staff Member holds a role at within this Tenant, for the context picker. Never crosses a Tenant boundary. */
+            switchableProperties: components["schemas"]["PropertyRef"][];
+            /** Format: date-time */
+            expiresAt: string;
+        };
+        PropertyRef: {
+            id: string;
+            name: string;
+        };
+        SessionToken: {
+            /** @description Bearer token carrying tenant and property (AD-3) and NO guest data (DG-1). Deliberately short-lived, because the refresh is where upstream deprovisioning bites (Story 1.5 AC-2). */
+            accessToken: string;
+            /** @enum {string} */
+            tokenType: "Bearer";
+            expiresInSeconds: number;
+            /** @description Single-use; presenting it twice invalidates the session chain. ABSENT for PIN and badge sessions, which end at the inactivity timeout and return the handset to the sign-in screen (Story 4.1 AC-2) rather than holding a long-lived credential on a device left in a corridor. */
+            refreshToken?: string;
+            session: components["schemas"]["Session"];
+        };
+        SwitchContextRequest: {
+            propertyId: string;
+        };
+        /** @description Exactly one of `code` (OIDC) or `samlResponse` (SAML 2.0). Both travel in the body, never a query string, and neither is ever logged. */
+        SsoCallbackRequest: {
+            /** @description Opaque, single-use, and bound to the /auth/sso/start that issued it. */
+            state: string;
+            code?: string;
+            samlResponse?: string;
+        } & (unknown | unknown);
+        RefreshRequest: {
+            refreshToken: string;
+        };
+        DeviceSignInRequest: {
+            /** @description The Property-issued Shared Device. Identifies the device for session hygiene (FR-64). It is NOT part of the idempotency key, which is keyed to the person (AD-7) - a device-scoped key would collide across shifts. */
+            deviceId: string;
+            /** @description One credential abstraction, so a badge Property needs no second flow. */
+            credential: components["schemas"]["PinCredential"] | components["schemas"]["BadgeCredential"];
+        };
+        PinCredential: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "pin";
+            /** @description A short Property-scoped reference to the Staff Member - not an email address. A linen-room handset at the start of a shift should not require typing one. Never logged. */
+            staffRef: string;
+            pin: string;
+        };
+        BadgeCredential: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "badge";
+            /** @description Opaque badge read. Never logged. */
+            badgeData: string;
+        };
+        /** @description One live session on one Shared Device. Carries no guest context (DG-1). */
+        DeviceSession: {
+            sessionId: string;
+            deviceId: string;
+            /** @description How the Property names the handset, so an administrator can tell which one this is. */
+            deviceLabel?: string;
+            staffMemberId: string;
+            propertyId: string;
+            /** @enum {string} */
+            credentialType: "sso" | "pin" | "badge";
+            /** Format: date-time */
+            startedAt: string;
+            /**
+             * Format: date-time
+             * @description Last successful contact. A device offline for a shift shows a stale value and is still signed in - see the revocation's 202.
+             */
+            lastSeenAt: string;
+            /** @description True for the caller's own session. */
+            current: boolean;
+        };
     };
     responses: {
         /** @description the one error envelope */
         Error: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorEnvelope"];
+            };
+        };
+        /** @description Documented but not built yet. `code` is `not_implemented` and `details.story` names the story that owns the operation. The edge derives these from this document, so an operation cannot be advertised as built while no handler exists behind it. */
+        NotImplemented: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorEnvelope"];
+            };
+        };
+        /** @description Rate-limited. `code` is `too_many_attempts` and `details.retryAfterSeconds` says how long. Deliberately indistinguishable between a wrong PIN and an unknown staff reference, so it cannot be used to enumerate staff. */
+        TooManyAttempts: {
             headers: {
                 [name: string]: unknown;
             };
@@ -417,6 +711,233 @@ export interface operations {
                     "application/json": components["schemas"]["SlaSnapshot"];
                 };
             };
+        };
+    };
+    getSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description the current session */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Session"];
+                };
+            };
+            401: components["responses"]["Error"];
+            501: components["responses"]["NotImplemented"];
+        };
+    };
+    switchContext: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SwitchContextRequest"];
+            };
+        };
+        responses: {
+            /** @description a new token scoped to the new Property */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionToken"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            501: components["responses"]["NotImplemented"];
+        };
+    };
+    startSso: {
+        parameters: {
+            query: {
+                tenantSlug: string;
+                /** @description A path within this console, validated server-side against an allowlist. An absolute URL is refused - an open redirect on a sign-in route is how a credential ends up somewhere it was not meant to go. */
+                returnTo?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description redirect to the identity provider */
+            302: {
+                headers: {
+                    /** @description the provider's authorisation endpoint */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            501: components["responses"]["NotImplemented"];
+        };
+    };
+    completeSso: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SsoCallbackRequest"];
+            };
+        };
+        responses: {
+            /** @description a session */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionToken"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            501: components["responses"]["NotImplemented"];
+        };
+    };
+    refreshToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RefreshRequest"];
+            };
+        };
+        responses: {
+            /** @description a new access token, and a new refresh token replacing the one presented */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionToken"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            501: components["responses"]["NotImplemented"];
+        };
+    };
+    signInOnSharedDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeviceSignInRequest"];
+            };
+        };
+        responses: {
+            /** @description a session scoped to the device's Property */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionToken"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            429: components["responses"]["TooManyAttempts"];
+            501: components["responses"]["NotImplemented"];
+        };
+    };
+    signOut: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description session ended */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            501: components["responses"]["NotImplemented"];
+        };
+    };
+    listDeviceSessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description open sessions within the caller's scope */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceSession"][];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            501: components["responses"]["NotImplemented"];
+        };
+    };
+    revokeDeviceSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description revocation accepted; the device is signed out at next contact */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            501: components["responses"]["NotImplemented"];
         };
     };
 }
