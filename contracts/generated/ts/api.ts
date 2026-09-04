@@ -425,6 +425,150 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/mfa": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The second factors enrolled on my own account.
+         * @description Never returns a secret - a TOTP secret is shown once, at enrolment, and is not retrievable afterwards. Returns only what a Settings surface needs to show: which methods exist, when each was enrolled, and which was last used.
+         */
+        get: operations["listMyFactors"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/mfa/enrolment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Begin enrolling a second factor.
+         * @description Returns an INACTIVE factor. For `totp` it carries the `otpauth://` URI once and never again; for `email_otp` it sends a code and carries nothing. The factor does not protect the account until `/auth/mfa/enrolment/verify` succeeds - which is what stops a mis-scanned QR code from locking a Staff Member out of their own account (Story 12.1 AC-3).
+         */
+        post: operations["startMfaEnrolment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/mfa/enrolment/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Activate a factor by proving it works.
+         * @description A code the new method actually produced. Only this activates the factor. A TOTP code accepted here is burned for the rest of its window, so a code read over someone's shoulder is not usable for its remaining seconds.
+         */
+        post: operations["verifyMfaEnrolment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/mfa/{factorId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a second factor from my own account.
+         * @description Attributed in the audit trail. If this is my last factor and my Tenant requires MFA (FR-85), the response says enrolment of another is required before I can continue - a Staff Member mid-replacement is in the same state as an unenrolled one, not a state of its own (Story 12.3 AC-1).
+         */
+        delete: operations["removeMyFactor"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/mfa/challenge/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Complete a sign-in challenge and receive a session.
+         * @description THE CHALLENGE TOKEN IS NOT A HALF-SESSION. It travels in this body, never as a bearer token, and it is minted with its own audience, a short lifetime and no scope - so presenting it to any other endpoint is refused. A "half-authenticated" token that ordinary handlers accept is an authentication bypass with extra steps, and Story 12.2 carries a test for exactly that.
+         *
+         *     The caller has already proved the password, so a failure here may tell THEM what is wrong. It tells an unauthenticated caller nothing.
+         */
+        post: operations["verifyMfaChallenge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/mfa/challenge/resend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reissue the email one-time code for a live challenge.
+         * @description `email_otp` only - there is nothing to resend for TOTP. Reissuing INVALIDATES the previous code, so two codes are never live at once, and it does not extend the challenge's own lifetime. Rate-limited, because this is an endpoint that sends mail on an unauthenticated caller's say-so.
+         */
+        post: operations["resendMfaChallengeCode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/staff/{staffMemberId}/mfa/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Clear a Staff Member's second factors so they can enrol again.
+         * @description RESET MEANS RE-ENROL, NOT BYPASS. The administrator clears the factors and the Staff Member enrols again; the administrator never obtains a working second factor for someone else's account, because that would make every administrator a way around MFA. Nothing in the response carries a secret or a code.
+         *
+         *     Ends the Staff Member's other sessions, because the threat model for a lost phone includes a session already open on it - the same revocation Story 4.8 uses, not a second mechanism.
+         */
+        post: operations["resetStaffMfa"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -604,6 +748,75 @@ export interface components {
             /** @description As in CredentialSetUpRequest - fragment-delivered */
             token: string;
             password: string;
+        };
+        /** @description A password sign-in has two outcomes and this is the discriminated shape of both, so that Story 12.2 makes the second branch REACHABLE without changing the response type any client already parses. Until then `status` is always `authenticated`. A `oneOf` at the top level would have forced every caller in two languages to re-derive which branch it got. */
+        SignInResult: {
+            /** @enum {string} */
+            status: "authenticated" | "mfa_required";
+            /** @description Present when `status` is `authenticated`. */
+            token?: components["schemas"]["SessionToken"];
+            /** @description Present when `status` is `mfa_required`. */
+            challenge?: components["schemas"]["MfaChallenge"];
+        };
+        /** @description Proof that a password was accepted, and nothing else. Not a session, not a scope, not a bearer token - see `/auth/mfa/challenge/verify`. */
+        MfaChallenge: {
+            /** @description Own audience, short lifetime, no scope, single purpose. Submitted in a body, never an `Authorization` header, and refused by every other endpoint. */
+            challengeToken: string;
+            /** Format: date-time */
+            expiresAt: string;
+            /** @description What this Staff Member can answer with, app first because it needs no mailbox (Story 12.1 AC-5). One entry per enrolled factor. */
+            methods: components["schemas"]["MfaMethodOption"][];
+        };
+        MfaMethodOption: {
+            factorId: string;
+            /** @enum {string} */
+            method: "totp" | "email_otp";
+            /** @description A masked hint for `email_otp` so the holder knows which mailbox to open - never the full address, which would make a challenge a disclosure. */
+            emailHint?: string;
+        };
+        /** @description An enrolled second factor. Never carries a secret. */
+        MfaFactor: {
+            factorId: string;
+            /** @enum {string} */
+            method: "totp" | "email_otp";
+            /** @description False between `/auth/mfa/enrolment` and a successful verify. */
+            active: boolean;
+            /**
+             * @description `totp` only, and a SUPPORT HINT ONLY - which app the Staff Member said they used. It never affects verification, because both apps consume the same secret and a code from either is valid.
+             * @enum {string}
+             */
+            appHint?: "google_authenticator" | "microsoft_authenticator" | "other";
+            /** Format: date-time */
+            enrolledAt: string;
+            /** Format: date-time */
+            lastUsedAt?: string;
+        };
+        StartMfaEnrolmentRequest: {
+            /** @enum {string} */
+            method: "totp" | "email_otp";
+            /** @enum {string} */
+            appHint?: "google_authenticator" | "microsoft_authenticator" | "other";
+        };
+        /** @description The inactive factor, plus the one-time enrolment material for `totp`. The secret appears HERE AND NOWHERE ELSE, ever again. */
+        MfaEnrolment: {
+            factor: components["schemas"]["MfaFactor"];
+            /** @description `totp` only. `otpauth://totp/...` - the QR code's contents, and the same string Google Authenticator, Microsoft Authenticator or any other TOTP app consumes. Absent for `email_otp`. */
+            otpauthUri?: string;
+            /** @description `totp` only. The same secret, formatted for typing, because a phone camera that will not focus is a support call otherwise. */
+            manualEntryKey?: string;
+        };
+        VerifyMfaEnrolmentRequest: {
+            factorId: string;
+            code: string;
+        };
+        VerifyMfaChallengeRequest: {
+            challengeToken: string;
+            factorId: string;
+            code: string;
+        };
+        ResendMfaChallengeRequest: {
+            challengeToken: string;
+            factorId: string;
         };
     };
     responses: {
@@ -971,17 +1184,26 @@ export interface operations {
             };
         };
         responses: {
-            /** @description a session */
+            /** @description A session, or - once Story 12.2 lands - a second-factor challenge. One response type either way: `status` discriminates, so making MFA reachable changes no caller's parsing (FR-84). */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SessionToken"];
+                    "application/json": components["schemas"]["SignInResult"];
                 };
             };
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
+            /** @description The Tenant requires MFA (FR-85) and this Staff Member has no enrolled factor, past the grace period. The password was correct, so this response names enrolment as the missing piece - which is safe precisely because the caller has already proved the credential (Story 12.4 AC-4). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
             429: components["responses"]["TooManyAttempts"];
             501: components["responses"]["NotImplemented"];
         };
@@ -1147,6 +1369,194 @@ export interface operations {
         responses: {
             /** @description revocation accepted; the device is signed out at next contact */
             202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            501: components["responses"]["NotImplemented"];
+        };
+    };
+    listMyFactors: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description my factors */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MfaFactor"][];
+                };
+            };
+            401: components["responses"]["Error"];
+            501: components["responses"]["NotImplemented"];
+        };
+    };
+    startMfaEnrolment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartMfaEnrolmentRequest"];
+            };
+        };
+        responses: {
+            /** @description an inactive factor, awaiting verification */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MfaEnrolment"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            501: components["responses"]["NotImplemented"];
+        };
+    };
+    verifyMfaEnrolment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VerifyMfaEnrolmentRequest"];
+            };
+        };
+        responses: {
+            /** @description the factor is active */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MfaFactor"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            429: components["responses"]["TooManyAttempts"];
+            501: components["responses"]["NotImplemented"];
+        };
+    };
+    removeMyFactor: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                factorId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            /** @description Removing this factor would leave the account unable to sign in under the Tenant's MFA requirement. `code` is `conflict`. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            501: components["responses"]["NotImplemented"];
+        };
+    };
+    verifyMfaChallenge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VerifyMfaChallengeRequest"];
+            };
+        };
+        responses: {
+            /** @description a session */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionToken"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            429: components["responses"]["TooManyAttempts"];
+            501: components["responses"]["NotImplemented"];
+        };
+    };
+    resendMfaChallengeCode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResendMfaChallengeRequest"];
+            };
+        };
+        responses: {
+            /** @description a new code has been sent, and the previous one no longer works */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            429: components["responses"]["TooManyAttempts"];
+            501: components["responses"]["NotImplemented"];
+        };
+    };
+    resetStaffMfa: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                staffMemberId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description factors cleared; the Staff Member's other sessions are revoked */
+            204: {
                 headers: {
                     [name: string]: unknown;
                 };

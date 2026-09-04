@@ -30,8 +30,11 @@ Authentication, though, is not one story's surface. It is spread across four:
 | `POST /auth/sign-out` | **4.1** | Ends the session, queued work survives (4.1 AC-2, AC-4) |
 | `GET /auth/sessions` | **4.8** | Device and session hygiene (FR-64) |
 | `DELETE /auth/sessions/{sessionId}` | **4.8** | Remote sign-out, honoured at next contact (4.8 AC-3) |
+| `GET /auth/mfa`, `POST /auth/mfa/enrolment`, `.../verify` | **12.1** | Enrol a second factor, verify before it activates (FR-84) |
+| `POST /auth/mfa/challenge/verify`, `.../resend` | **12.2** | The sign-in challenge (FR-84) |
+| `DELETE /auth/mfa/{factorId}`, `POST /auth/staff/{id}/mfa/reset` | **12.3** | Replace a factor; administrator-issued reset (FR-84) |
 
-Those thirteen operations share one `Session` shape, one token shape and one set of rules
+Those twenty operations share one `Session` shape, one token shape and one set of rules
 about what a credential may do. Discovering that in Story 4.8 would mean changing what
 Story 1.3 had already shipped — and a wire type that changes after clients exist is the
 expensive kind of change, because it lands in Dart and TypeScript at once.
@@ -52,7 +55,7 @@ markers are load-bearing rather than decorative:
 1. **`edge/src/not-implemented.ts` derives its behaviour from the document.** Every
    operation marked `x-implemented: false` answers **501 `not_implemented`** with its
    owning story in `details.story`. Nothing is listed by hand.
-2. **It is consulted before tenancy resolution.** Eight of the thirteen operations are how a
+2. **It is consulted before tenancy resolution.** Eight of the twenty operations are how a
    caller *obtains* a credential, so demanding one in order to be told the operation does
    not exist would be circular. Without this, a reader pressing "Try it out" on
    `POST /auth/device/sign-in` got **401 unauthenticated** — which reads as "your
@@ -67,7 +70,7 @@ markers are load-bearing rather than decorative:
    will ever remove; the suite fails on a missing `x-story`.
 5. **Opting out of auth is a closed allowlist**, asserted in both directions. Adding
    `security: []` to an operation without adding it to the allowlist fails, and so does
-   listing a path there that no longer opts out. The eleven permitted names are health and
+   listing a path there that no longer opts out. The thirteen permitted names are health and
    docs (no tenant data) and the eight auth entry points - where a credential is obtained,
    or where control of a mailbox is proved in order to set one.
 
@@ -112,26 +115,93 @@ administrator's invitation and Story 1.3 redeems it, so between them a provision
 has an administrator who cannot yet sign in. The two stories must agree the token's shape
 before either starts - the same arrangement 4.1 and 4.3 have over the offline queue.
 
-## The Jazzware operator is deliberately absent
+## The Jazzware operator: absent from the cell, and now owned
 
-There is **no** operator or super-admin sign-in on this API, and that is a decision
-rather than an omission:
+There is **no** operator sign-in in `contracts/openapi.yaml`, and there never will be:
 
 - FR-1 puts Tenant creation on "a Jazzware-internal function on a surface the product
   does not link to", reachable by no hotel-side role. The UX spine makes it a separate
   product (W35) with a different brand and an amber accent, "because an internal tool
   that looks like the customer product is how someone acts in the wrong context".
-- AD-4 puts the control plane outside the regional cells, and this document describes a
-  cell (`servers: /v1`, "This cell, behind the edge"). Operator auth here would recreate
-  exactly the vendor/customer conflation FR-1's amendment exists to remove.
+- AD-4 puts the control plane outside the regional cells, and `openapi.yaml` describes a
+  cell. Operator auth there would recreate exactly the vendor/customer conflation FR-1's
+  amendment exists to remove.
 - FR-1 and Story 1.1 AC-3: provisioning grants Jazzware **no standing access** to tenant
-  data, and support access is separately requested, time-boxed and recorded in the
-  Tenant's own audit trail. An operator who could sign in to a cell would defeat that.
+  data; support access is separately requested, time-boxed and recorded in the Tenant's own
+  audit trail. An operator who could sign in to a cell would defeat that.
 
-The gap is that Story 1.1 AC-1 opens with "**Given** I am authenticated as a Jazzware
-operator on the internal provisioning surface" - a precondition **no story builds**. It
-needs its own control-plane contract, and a story that does not exist. That is a change
-to raise in `epics.md`.
+**Resolved 2026-09-04.** What was missing was not the decision but an owner: Story 1.1 AC-1
+opened "**Given** I am authenticated as a Jazzware operator on the internal provisioning
+surface" — a precondition no requirement stated and no story built, which left the
+documented provisioning path unbuildable. So:
+
+- **FR-86** was added to the PRD (operator authentication, control plane, no standing
+  access, deactivation at next validation, its own audit trail).
+- **Epic 11** was added to `epics.md` — three stories, **R1**, because Story 1.1 waits on
+  11.1. It is the first epic whose user is a Jazzware operator rather than a hotel
+  employee: a different audience, not an absent one.
+- **`contracts/control-plane-openapi.yaml`** was created: its own document, its own
+  `servers` prefix, and its own `operatorBearerAuth` scheme with a **different issuer and
+  audience**, so an operator token is *structurally* unusable against a cell rather than
+  merely unauthorised by a check somebody could later widen. `POST /tenants` and
+  `POST /tenants/{id}/support-access` live there under `x-story: "1.1"` — the behaviour is
+  Story 1.1's, only the surface is internal.
+- The separation is **gated**, not trusted: the drift gate fails if the two documents share
+  a path, if an operator path appears in the cell document, if a cell path appears in the
+  control-plane document, or if both use the same security scheme. The smoke suite
+  additionally asserts the running cell serves none of the internal paths — **404, not
+  501**, because a 501 would say "coming here soon", which is the opposite of what AD-4
+  decided. Negative controls 18 and 19 prove both can go red.
+
+## The second factor (FR-84, FR-85, Epic 12, R2)
+
+Added 2026-09-04 at Tanim's direction, closing open questions 4 and 5 below.
+
+**Off by default, each Staff Member's own to enable, and requirable Tenant-wide.** Tanim
+chose Tenant-wide enforcement over per-user opt-in alone, because brand security
+questionnaires ask for it and retrofitting enforcement after clients exist costs more than
+the setting.
+
+**Two mechanisms, three labels.** A one-time code by email, and TOTP (RFC 6238).
+*Google Authenticator and Microsoft Authenticator are the same TOTP secret* — offering them
+as separate integrations would create two code paths that must agree forever for no
+user-visible gain, so they are two labels on one method, with an `appHint` recorded for
+support conversations that never affects verification. Worth saying out loud because the
+request named three options and the honest implementation has two.
+
+**Scope, from FR-84 and not negotiable per-story:** the password credential only. A
+provider-governed identity authenticates under that provider's policy (FR-3) and gets no
+second challenge from us; a **PIN or badge on a Shared Device is out of scope**, because a
+second factor cannot be reconciled with a five-second sign-in on a shared handset in a
+corridor with gloves on (FR-4, NFR-5). FR-4's credential-scope rule is the control that
+applies there.
+
+**Three shapes worth not re-litigating:**
+
+- `POST /auth/sign-in` returns **`SignInResult`**, a discriminated `status` of
+  `authenticated` or `mfa_required`, from the day Story 1.3 builds it. Until Story 12.2
+  lands it is always `authenticated`. A `oneOf` at the top level would have forced every
+  caller in two languages to re-derive which branch it got, and a second response type
+  later would have been a breaking change to a shipped client.
+- **The challenge token is not a half-session.** Own audience, short lifetime, no scope,
+  submitted in a body and never as a bearer token — a "half-authenticated" token that
+  ordinary handlers accept is an authentication bypass with extra steps, and Story 12.2
+  carries a test that presenting it elsewhere is refused.
+- **A reset means re-enrol, not bypass.** An administrator clears the factors; they never
+  obtain a working second factor for someone else's account, because that would make every
+  administrator a way around MFA.
+
+**Deliberately not in this contract:** FR-85's enforcement toggle. It is a Tenant setting
+on the surface Stories 1.5 and 1.6 own, and that surface has no contract yet — putting a
+settings API in an auth document to avoid an empty space would be the wrong kind of tidy.
+
+**Operator MFA follows the same rules**, at Tanim's decision: off by default, the
+operator's own to enable, and available to be required across the operator organisation by
+the same enforcement mechanism. I had recommended making it mandatory in code, since an
+operator account can create customers; the chosen answer is defensible because Jazzware can
+switch on the same Tenant-style enforcement for itself as policy — the risk is that policy
+is a thing someone has to remember and code is not, so it is worth putting on whoever owns
+Jazzware's security posture rather than leaving it implied here.
 
 ## Decisions recorded in the contract itself
 
@@ -198,18 +268,17 @@ guess the authority of a decision:
    an administrator can see live sessions, but no FR says so. `GET /auth/sessions` is
    modelled as a Property-scoped administrator read; if it is meant to be an audit surface
    instead, it belongs in Epic 10 and Story 4.8's scope changes.
-4. **Credential recovery policy.** No FR covers it, and Story 1.3's acceptance criteria do
-   not require it. `/auth/password/forgot` and `/auth/password/reset` are in the contract
-   at the shape level only, and **must not be built before epics.md settles the policy**:
-   whether self-service reset is permitted for an administrator at all, or whether recovery
-   runs through a time-boxed Jazzware support request. Both directions have a real cost -
-   an administrator locked out of a Tenant with no identity connection has no other way in,
-   while self-service reset on an account with no second factor is a password-reset
-   takeover.
-5. **Whether the password fallback requires a second factor.** NFR-7 says "no shared
-   administrative accounts" and is silent on MFA. A password fallback for a tenant
-   administrator without one is a decision that should be taken deliberately rather than
-   by omission, and it is the same decision as question 4 seen from the other side.
+4. ~~**Credential recovery policy.**~~ **CLOSED 2026-09-04: self-service reset is
+   permitted.** `/auth/password/forgot` and `/auth/password/reset` are Story 1.3's to build
+   as specified. Note what this means in combination with question 5's answer: for a Staff
+   Member with **no second factor enrolled**, self-service reset makes the mailbox the only
+   thing standing between an attacker and the account. That is a normal industry position
+   and it is now a deliberate one, but it is the reason FR-84 exists and the reason a
+   security review will ask when Epic 12 ships.
+5. ~~**Whether the password fallback requires a second factor.**~~ **CLOSED 2026-09-04: MFA
+   exists, off by default (FR-84), and a tenant administrator can require it Tenant-wide
+   (FR-85).** Epic 12, R2. Not required by the product for anyone; required by a Tenant for
+   its own people at that Tenant's choice.
 6. **The region at sign-in.** The UX spine states the region at sign-in "because it is a
    residency fact, not a detail" (DG-4), and `Session` carries no region field. Small, but
    it belongs to whoever builds 1.3.
@@ -223,4 +292,4 @@ guess the authority of a decision:
   becomes a second description of the API — exactly what generating a spec from decorated
   controllers would have done, which the contracts-first direction exists to prevent.
 - **Serve nothing for the unbuilt operations.** Rejected: the docs page would advertise
-  thirteen endpoints that answer 401, teaching every reader something false about the API.
+  twenty endpoints that answer 401, teaching every reader something false about the API.

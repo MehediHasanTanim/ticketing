@@ -1,9 +1,17 @@
 ---
 title: JazzTicketing
 created: 2026-08-29
-updated: 2026-09-02
+updated: 2026-09-04
 status: final
 ---
+
+<!-- AMENDMENT 2026-09-04, at Tanim's direction, after the auth contract exposed a gap.
+     Added FR-84 (per-Staff-Member multi-factor authentication, off by default), FR-85
+     (Tenant-wide MFA enforcement) and FR-86 (Jazzware operator authentication) to
+     section 4.1, and placed FR-86 in R1 and FR-84/FR-85 in R2 in section 6.3. FR-86 is
+     not new product scope so much as a requirement that was always implied: FR-1 has
+     always needed a Jazzware operator to exist, and nothing said how one signs in.
+     Everything else in this document is unchanged. -->
 
 # PRD: JazzTicketing
 *Working title — confirm.*
@@ -142,6 +150,45 @@ A property administrator can configure Departments, Locations and Rooms, Catalog
 #### FR-6: Audit trail
 The system records every state change on a Job, Glitch, Room Status, Lost & Found Item, and configuration value with actor, timestamp, and previous value.
 **Consequences (testable):** Audit entries are immutable and readable by property administrators and above; retention is configurable per Tenant within the bounds set in §11; an audit export for a date range is available to a property administrator.
+
+#### FR-84: Multi-factor authentication, per Staff Member
+A Staff Member who signs in with a password can enable a second factor for their own account from Settings, choosing from more than one method.
+
+**Consequences (testable):**
+- **Off by default.** No Staff Member is required to enrol by this requirement alone; enrolment is the individual's own action, and FR-85 is the only thing that can compel it.
+- The offered methods are a **one-time code by email** and an **authenticator app** (TOTP, RFC 6238) — the console presents the authenticator option as both *Google Authenticator* and *Microsoft Authenticator* because those are the apps staff have, and both consume the same enrolment secret. A Staff Member may hold both an email method and an app method, and chooses which to use at sign-in.
+- Enrolment is not complete until a code produced by the new method has been verified, so a mis-scanned QR code cannot lock a Staff Member out of their own account.
+- Disabling a factor, and every enrolment, is attributed in the audit trail (FR-6) with the method and the time, and never with the secret.
+- MFA applies to the **password credential only.** An identity governed by a connected identity provider authenticates under that provider's own policy (FR-3) — JazzTicketing does not add a second challenge on top of it — and a **PIN or badge on a Shared Device is out of scope**, because a second factor cannot be reconciled with a five-second sign-in on a shared handset in a corridor (FR-4, NFR-5). The credential-scope rule in FR-4 remains the control that applies there.
+- A Staff Member who has lost their second factor recovers through an administrator-issued reset that is attributed in the audit trail, never by self-service bypass of the factor itself.
+
+`[NOTE FOR PM]` Added 2026-09-04 at Tanim's direction. The PRD previously specified no second factor anywhere, and NFR-7's "no shared administrative accounts" was the only adjacent control.
+
+#### FR-85: Tenant-wide multi-factor enforcement
+A tenant administrator can require multi-factor authentication for password sign-in across their Tenant.
+
+**Consequences (testable):**
+- The setting is **per Tenant, never global** (as FR-3 is), and lives with the other Tenant-level settings whose blast radius is displayed (FR-83).
+- Turning it on does not lock out the people already signed in: an unenrolled Staff Member is prompted to enrol at their next sign-in and can complete enrolment during a **grace period the tenant administrator sets**, after which password sign-in without an enrolled factor is refused server-side (AD-11).
+- The refusal is distinguishable from a wrong password **to the person signing in**, who needs to know that enrolment is what is missing, while telling an unauthenticated caller nothing about whether the account exists.
+- Enforcement cannot strand a Tenant: at least one enrolled tenant administrator is required before enforcement can be switched on, and the check is server-side.
+- It applies to the password credential only, for the reasons in FR-84, and it therefore does not affect Shared Device sign-in or an identity provider's own policy.
+- Switching it on or off, and any change to the grace period, is attributed in the audit trail (FR-6).
+
+`[NOTE FOR PM]` Added 2026-09-04 at Tanim's direction, chosen over per-user opt-in alone: brand security questionnaires ask for it, and retrofitting enforcement after clients exist is more expensive than the setting.
+
+#### FR-86: Jazzware operator authentication
+A Jazzware operator authenticates to the internal provisioning surface separately from every hotel-side identity, and that authentication grants no access to tenant data.
+
+**Consequences (testable):**
+- Operator identity lives in the **control plane, not in a regional cell** (AD-4). No operator credential exists in any cell, and no cell endpoint authenticates an operator — the two are separate surfaces with separate contracts, which is what makes FR-1's "provisioning grants Jazzware no standing access" enforceable rather than a promise.
+- Signing in as an operator yields a session scoped to provisioning actions only. It confers **no read** of any Tenant's operational or guest data; reaching that data requires the separately requested, time-boxed grant of FR-1, which appears in the customer's own audit trail.
+- The operator surface is reachable by no hotel-side role, and the product presents no link to it (FR-1, UX `EXPERIENCE-WEB.md.Two audiences, two products`).
+- Operator MFA follows FR-84 and FR-85 as for any other password user: off by default, enabled by the operator, and available to be **required across the operator organisation** by the same enforcement setting. Jazzware's own security policy, not this requirement, decides whether to switch it on.
+- Every operator action, and every operator sign-in, is recorded in an operator audit trail that is not a Tenant's own (FR-6 governs the Tenant's; this is its counterpart), and no entry carries guest data (AD-4, AD-10).
+- Deactivating an operator ends their sessions at next token validation, on the same terms FR-3 sets for a deprovisioned tenant identity.
+
+`[NOTE FOR PM]` Added 2026-09-04. FR-1 has always required a Jazzware operator to exist, and Story 1.1's first acceptance criterion opened with "Given I am authenticated as a Jazzware operator" — a precondition **no requirement stated and no story built**, which would have left the documented provisioning path unbuildable. Found while designing the auth contract.
 
 ### 4.2 Guest Request Dispatch
 
@@ -570,7 +617,12 @@ The constraint set is now known: an existing team already carrying adapter work,
 **R1 — Prove the spine end to end.** Tenancy, identity, configuration, audit (FR-1..FR-6). Job core: lifecycle, SLA Clock, pauses, routing, escalation (FR-7..FR-18). Jazz Core integration in full (FR-49..FR-57, FR-77, FR-78). Mobile foundation including offline, push, photos, shared-device sign-in, and the complete i18n/RTL machinery (FR-58..FR-64). Notification and escalation routing (FR-65..FR-68). Minimum reporting: department dashboard, SLA reporting, adoption and data-quality reporting (FR-69, FR-71, FR-74). Locales: English plus **Arabic**, to prove the RTL path is real rather than planned.
 *This is the demonstrable product: a guest calls, Jazz Core reports it, a Request appears pre-resolved, a phone buzzes, a clock runs, an escalation fires, a dashboard shows it. It is also the whole of the thesis.*
 
-**R2 — Housekeeping** (FR-19..FR-29) with Room Status depth, boards, inspections, turndown. The highest-volume adoption surface and the strongest proof of Jazz Core's two-way Room Status.
+**R1 also carries FR-86, Jazzware operator authentication**, because it is a prerequisite
+rather than a feature: Story 1.1 provisions a Tenant "given I am authenticated as a
+Jazzware operator", so without it nothing can be provisioned by the documented path and R1
+has no starting state.
+
+**R2 — Housekeeping** (FR-19..FR-29) with Room Status depth, boards, inspections, turndown, **plus multi-factor authentication (FR-84, FR-85)** — new scope that a first customer's security review will ask for, deliberately not competing with the R1 spine. The highest-volume adoption surface and the strongest proof of Jazz Core's two-way Room Status.
 
 **R3 — Engineering and work orders** (FR-30..FR-39) with the Asset registry, PM Schedules, and recurring-fault detection, plus Asset reporting (FR-72).
 

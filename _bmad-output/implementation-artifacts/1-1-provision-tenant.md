@@ -62,14 +62,17 @@ Tenant provisioned here has a first administrator who cannot sign in. The token 
 a URL **fragment**, never a query string, so it reaches no access log and no `Referer`
 header.
 
-*AC-1's first clause is a precondition nothing builds.* "**Given** I am authenticated as a
-Jazzware operator on the internal provisioning surface" — no story in `epics.md` builds
-that authentication, and it deliberately does **not** belong on this cell's API: FR-1 puts
-Tenant creation on a surface the product does not link to, and AD-4 puts the control plane
-outside the cells `contracts/openapi.yaml` describes. It needs its own control-plane
-contract and its own story. **Raise it in epics.md rather than improvising it here** — and
-in particular do not add an operator credential to the cell, which would defeat FR-1's
-"provisioning grants Jazzware no standing access to tenant data".
+*AC-1's first clause is now owned — by Story 11.1.* "**Given** I am authenticated as a
+Jazzware operator on the internal provisioning surface" was a precondition no requirement
+stated and no story built. Resolved 2026-09-04: **FR-86** and **Epic 11** were added, and
+**this story waits for 11.1** (epics.md **Backlog order vs epic number**). Operator
+identity lives in the control plane with its own contract,
+`contracts/control-plane-openapi.yaml` — deliberately **not** on this cell's API, because
+FR-1 puts Tenant creation on a surface the product does not link to and AD-4 puts the
+control plane outside the cells `contracts/openapi.yaml` describes. **Never add an operator
+credential to a cell**: the separation is what makes FR-1's "provisioning grants Jazzware
+no standing access to tenant data" enforceable rather than a promise. AC-3's support-access
+grant stays owned here, and Story 11.3 records its operator-side half.
 
 **Scope guards.** This story creates a Tenant and one administrator. It does **not** create Properties (1.2), assign roles beyond the first administrator (1.3), define custom roles (1.4), connect an identity provider (1.5), or manage Tenant defaults (1.6). Do not build a Tenant settings screen here.
 

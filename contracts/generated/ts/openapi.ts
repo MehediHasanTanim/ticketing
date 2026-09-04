@@ -518,11 +518,11 @@ export const OPENAPI_DOCUMENT = {
         },
         "responses": {
           "200": {
-            "description": "a session",
+            "description": "A session, or - once Story 12.2 lands - a second-factor challenge. One response type either way: `status` discriminates, so making MFA reachable changes no caller's parsing (FR-84).",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SessionToken"
+                  "$ref": "#/components/schemas/SignInResult"
                 }
               }
             }
@@ -532,6 +532,16 @@ export const OPENAPI_DOCUMENT = {
           },
           "401": {
             "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "description": "The Tenant requires MFA (FR-85) and this Staff Member has no enrolled factor, past the grace period. The password was correct, so this response names enrolment as the missing piece - which is safe precisely because the caller has already proved the credential (Story 12.4 AC-4).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           },
           "429": {
             "$ref": "#/components/responses/TooManyAttempts"
@@ -789,6 +799,303 @@ export const OPENAPI_DOCUMENT = {
         "responses": {
           "202": {
             "description": "revocation accepted; the device is signed out at next contact"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/NotImplemented"
+          }
+        }
+      }
+    },
+    "/auth/mfa": {
+      "get": {
+        "operationId": "listMyFactors",
+        "tags": [
+          "auth"
+        ],
+        "x-story": "12.1",
+        "x-implemented": false,
+        "summary": "The second factors enrolled on my own account.",
+        "description": "Never returns a secret - a TOTP secret is shown once, at enrolment, and is not retrievable afterwards. Returns only what a Settings surface needs to show: which methods exist, when each was enrolled, and which was last used.",
+        "responses": {
+          "200": {
+            "description": "my factors",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MfaFactor"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/NotImplemented"
+          }
+        }
+      }
+    },
+    "/auth/mfa/enrolment": {
+      "post": {
+        "operationId": "startMfaEnrolment",
+        "tags": [
+          "auth"
+        ],
+        "x-story": "12.1",
+        "x-implemented": false,
+        "summary": "Begin enrolling a second factor.",
+        "description": "Returns an INACTIVE factor. For `totp` it carries the `otpauth://` URI once and never again; for `email_otp` it sends a code and carries nothing. The factor does not protect the account until `/auth/mfa/enrolment/verify` succeeds - which is what stops a mis-scanned QR code from locking a Staff Member out of their own account (Story 12.1 AC-3).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartMfaEnrolmentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "an inactive factor, awaiting verification",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MfaEnrolment"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/NotImplemented"
+          }
+        }
+      }
+    },
+    "/auth/mfa/enrolment/verify": {
+      "post": {
+        "operationId": "verifyMfaEnrolment",
+        "tags": [
+          "auth"
+        ],
+        "x-story": "12.1",
+        "x-implemented": false,
+        "summary": "Activate a factor by proving it works.",
+        "description": "A code the new method actually produced. Only this activates the factor. A TOTP code accepted here is burned for the rest of its window, so a code read over someone's shoulder is not usable for its remaining seconds.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyMfaEnrolmentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "the factor is active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MfaFactor"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyAttempts"
+          },
+          "501": {
+            "$ref": "#/components/responses/NotImplemented"
+          }
+        }
+      }
+    },
+    "/auth/mfa/{factorId}": {
+      "delete": {
+        "operationId": "removeMyFactor",
+        "tags": [
+          "auth"
+        ],
+        "x-story": "12.3",
+        "x-implemented": false,
+        "summary": "Remove a second factor from my own account.",
+        "description": "Attributed in the audit trail. If this is my last factor and my Tenant requires MFA (FR-85), the response says enrolment of another is required before I can continue - a Staff Member mid-replacement is in the same state as an unenrolled one, not a state of its own (Story 12.3 AC-1).",
+        "parameters": [
+          {
+            "name": "factorId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "removed"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "Removing this factor would leave the account unable to sign in under the Tenant's MFA requirement. `code` is `conflict`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "501": {
+            "$ref": "#/components/responses/NotImplemented"
+          }
+        }
+      }
+    },
+    "/auth/mfa/challenge/verify": {
+      "post": {
+        "operationId": "verifyMfaChallenge",
+        "tags": [
+          "auth"
+        ],
+        "x-story": "12.2",
+        "x-implemented": false,
+        "security": [],
+        "summary": "Complete a sign-in challenge and receive a session.",
+        "description": "THE CHALLENGE TOKEN IS NOT A HALF-SESSION. It travels in this body, never as a bearer token, and it is minted with its own audience, a short lifetime and no scope - so presenting it to any other endpoint is refused. A \"half-authenticated\" token that ordinary handlers accept is an authentication bypass with extra steps, and Story 12.2 carries a test for exactly that.\n\nThe caller has already proved the password, so a failure here may tell THEM what is wrong. It tells an unauthenticated caller nothing.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyMfaChallengeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "a session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionToken"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyAttempts"
+          },
+          "501": {
+            "$ref": "#/components/responses/NotImplemented"
+          }
+        }
+      }
+    },
+    "/auth/mfa/challenge/resend": {
+      "post": {
+        "operationId": "resendMfaChallengeCode",
+        "tags": [
+          "auth"
+        ],
+        "x-story": "12.2",
+        "x-implemented": false,
+        "security": [],
+        "summary": "Reissue the email one-time code for a live challenge.",
+        "description": "`email_otp` only - there is nothing to resend for TOTP. Reissuing INVALIDATES the previous code, so two codes are never live at once, and it does not extend the challenge's own lifetime. Rate-limited, because this is an endpoint that sends mail on an unauthenticated caller's say-so.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResendMfaChallengeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "a new code has been sent, and the previous one no longer works"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyAttempts"
+          },
+          "501": {
+            "$ref": "#/components/responses/NotImplemented"
+          }
+        }
+      }
+    },
+    "/auth/staff/{staffMemberId}/mfa/reset": {
+      "post": {
+        "operationId": "resetStaffMfa",
+        "tags": [
+          "auth"
+        ],
+        "x-story": "12.3",
+        "x-implemented": false,
+        "summary": "Clear a Staff Member's second factors so they can enrol again.",
+        "description": "RESET MEANS RE-ENROL, NOT BYPASS. The administrator clears the factors and the Staff Member enrols again; the administrator never obtains a working second factor for someone else's account, because that would make every administrator a way around MFA. Nothing in the response carries a secret or a code.\n\nEnds the Staff Member's other sessions, because the threat model for a lost phone includes a session already open on it - the same revocation Story 4.8 uses, not a second mechanism.",
+        "parameters": [
+          {
+            "name": "staffMemberId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "factors cleared; the Staff Member's other sessions are revoked"
           },
           "401": {
             "$ref": "#/components/responses/Error"
@@ -1428,6 +1735,231 @@ export const OPENAPI_DOCUMENT = {
             "writeOnly": true,
             "minLength": 12,
             "maxLength": 256
+          }
+        }
+      },
+      "SignInResult": {
+        "type": "object",
+        "description": "A password sign-in has two outcomes and this is the discriminated shape of both, so that Story 12.2 makes the second branch REACHABLE without changing the response type any client already parses. Until then `status` is always `authenticated`. A `oneOf` at the top level would have forced every caller in two languages to re-derive which branch it got.",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "authenticated",
+              "mfa_required"
+            ]
+          },
+          "token": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SessionToken"
+              }
+            ],
+            "description": "Present when `status` is `authenticated`."
+          },
+          "challenge": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MfaChallenge"
+              }
+            ],
+            "description": "Present when `status` is `mfa_required`."
+          }
+        }
+      },
+      "MfaChallenge": {
+        "type": "object",
+        "description": "Proof that a password was accepted, and nothing else. Not a session, not a scope, not a bearer token - see `/auth/mfa/challenge/verify`.",
+        "required": [
+          "challengeToken",
+          "expiresAt",
+          "methods"
+        ],
+        "properties": {
+          "challengeToken": {
+            "type": "string",
+            "writeOnly": true,
+            "description": "Own audience, short lifetime, no scope, single purpose. Submitted in a body, never an `Authorization` header, and refused by every other endpoint."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "methods": {
+            "type": "array",
+            "description": "What this Staff Member can answer with, app first because it needs no mailbox (Story 12.1 AC-5). One entry per enrolled factor.",
+            "items": {
+              "$ref": "#/components/schemas/MfaMethodOption"
+            }
+          }
+        }
+      },
+      "MfaMethodOption": {
+        "type": "object",
+        "required": [
+          "factorId",
+          "method"
+        ],
+        "properties": {
+          "factorId": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "totp",
+              "email_otp"
+            ]
+          },
+          "emailHint": {
+            "type": "string",
+            "description": "A masked hint for `email_otp` so the holder knows which mailbox to open - never the full address, which would make a challenge a disclosure."
+          }
+        }
+      },
+      "MfaFactor": {
+        "type": "object",
+        "description": "An enrolled second factor. Never carries a secret.",
+        "required": [
+          "factorId",
+          "method",
+          "active",
+          "enrolledAt"
+        ],
+        "properties": {
+          "factorId": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "totp",
+              "email_otp"
+            ]
+          },
+          "active": {
+            "type": "boolean",
+            "description": "False between `/auth/mfa/enrolment` and a successful verify."
+          },
+          "appHint": {
+            "type": "string",
+            "enum": [
+              "google_authenticator",
+              "microsoft_authenticator",
+              "other"
+            ],
+            "description": "`totp` only, and a SUPPORT HINT ONLY - which app the Staff Member said they used. It never affects verification, because both apps consume the same secret and a code from either is valid."
+          },
+          "enrolledAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastUsedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "StartMfaEnrolmentRequest": {
+        "type": "object",
+        "required": [
+          "method"
+        ],
+        "properties": {
+          "method": {
+            "type": "string",
+            "enum": [
+              "totp",
+              "email_otp"
+            ]
+          },
+          "appHint": {
+            "type": "string",
+            "enum": [
+              "google_authenticator",
+              "microsoft_authenticator",
+              "other"
+            ]
+          }
+        }
+      },
+      "MfaEnrolment": {
+        "type": "object",
+        "description": "The inactive factor, plus the one-time enrolment material for `totp`. The secret appears HERE AND NOWHERE ELSE, ever again.",
+        "required": [
+          "factor"
+        ],
+        "properties": {
+          "factor": {
+            "$ref": "#/components/schemas/MfaFactor"
+          },
+          "otpauthUri": {
+            "type": "string",
+            "description": "`totp` only. `otpauth://totp/...` - the QR code's contents, and the same string Google Authenticator, Microsoft Authenticator or any other TOTP app consumes. Absent for `email_otp`."
+          },
+          "manualEntryKey": {
+            "type": "string",
+            "description": "`totp` only. The same secret, formatted for typing, because a phone camera that will not focus is a support call otherwise."
+          }
+        }
+      },
+      "VerifyMfaEnrolmentRequest": {
+        "type": "object",
+        "required": [
+          "factorId",
+          "code"
+        ],
+        "properties": {
+          "factorId": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "writeOnly": true,
+            "minLength": 4,
+            "maxLength": 12
+          }
+        }
+      },
+      "VerifyMfaChallengeRequest": {
+        "type": "object",
+        "required": [
+          "challengeToken",
+          "factorId",
+          "code"
+        ],
+        "properties": {
+          "challengeToken": {
+            "type": "string",
+            "writeOnly": true
+          },
+          "factorId": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "writeOnly": true,
+            "minLength": 4,
+            "maxLength": 12
+          }
+        }
+      },
+      "ResendMfaChallengeRequest": {
+        "type": "object",
+        "required": [
+          "challengeToken",
+          "factorId"
+        ],
+        "properties": {
+          "challengeToken": {
+            "type": "string",
+            "writeOnly": true
+          },
+          "factorId": {
+            "type": "string"
           }
         }
       }

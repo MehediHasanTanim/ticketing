@@ -70,8 +70,13 @@ link travels in a URL **fragment**, never a query string, so it reaches no acces
 no `Referer` header. **Story 1.1 issues the FIRST administrator's invitation and this
 story redeems it**: agree the token's shape with 1.1 before starting either, because until
 both are built a provisioned Tenant has an administrator who cannot sign in.
-**`forgot`/`reset` are designed at the shape level only and must not be built until
-epics.md settles the recovery and MFA policy** — ADR 0002, open questions 4 and 5. `/auth/session` IS the
+**Recovery policy settled 2026-09-04: self-service password reset IS permitted**, so
+`/auth/password/forgot` and `/auth/password/reset` are this story's to build as specified —
+`forgot` always answering 202, `reset` returning 204 and revoking every other session.
+The second factor that makes self-service reset safe is **not this story's**: it is FR-84
+and FR-85, owned by Epic 12 in R2, and a Staff Member with no factor enrolled is exactly
+the case a reset takeover exploits. Say so when this ships rather than discovering it in a
+security review — see ADR 0002. `/auth/session` IS the
 single decision point T4 asks for; its `permissions` array is the server's answer that the
 interface renders from. Two decisions recorded there are binding: a context switch **mints
 a new token** rather than reinterpreting the old one (AD-3), and a `propertyId` in another

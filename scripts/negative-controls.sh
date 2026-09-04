@@ -189,6 +189,45 @@ expect_red "localisation contract, untranslated error code" node scripts/gate-co
 cp /tmp/ar.nc.bak contracts/locale/ar.json
 npm run --silent codegen >/dev/null 2>&1
 
+echo "== 18. surface separation: put an internal path in the CELL document =="
+# FR-1 puts Tenant creation on a Jazzware-internal surface the product does not
+# link to; AD-4 puts the control plane outside the cells. If an operator path can
+# appear in the cell document, "provisioning grants Jazzware no standing access to
+# tenant data" stops being enforceable and becomes a promise.
+cp contracts/openapi.yaml /tmp/openapi.sep.bak
+python3 - <<'PY2'
+import pathlib
+p = pathlib.Path('contracts/openapi.yaml'); t = p.read_text()
+p.write_text(t.replace('\ncomponents:\n', """
+  /operator/sign-in:
+    post:
+      operationId: operatorSignInLeak
+      tags: [auth]
+      x-story: "11.1"
+      x-implemented: false
+      security: []
+      responses:
+        "200": { description: leaked }
+components:
+""", 1))
+PY2
+expect_red "surface separation, internal path in the cell document" node scripts/gate-codegen-drift.mjs
+cp /tmp/openapi.sep.bak contracts/openapi.yaml
+npm run --silent codegen >/dev/null 2>&1
+
+echo "== 19. surface separation: let both documents share one security scheme =="
+# A shared scheme means one credential type addressing both surfaces, which is the
+# permission-check-somebody-widens version of the separation instead of a different key.
+cp contracts/control-plane-openapi.yaml /tmp/control.sep.bak
+python3 - <<'PY2'
+import pathlib
+p = pathlib.Path('contracts/control-plane-openapi.yaml'); t = p.read_text()
+p.write_text(t.replace('operatorBearerAuth:', 'bearerAuth:').replace('- operatorBearerAuth: []', '- bearerAuth: []'))
+PY2
+expect_red "surface separation, one scheme for both surfaces" node scripts/gate-codegen-drift.mjs
+cp /tmp/control.sep.bak contracts/control-plane-openapi.yaml
+npm run --silent codegen >/dev/null 2>&1
+
 echo
 echo "negative controls: ${pass} correctly went red, ${fail} did not, ${unverified} unverifiable here"
 [ "${fail}" -eq 0 ]

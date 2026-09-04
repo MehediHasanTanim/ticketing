@@ -131,3 +131,16 @@ development_status:
   10-2-report-glitches-what-they-cost: ready-for-dev
   10-3-export-report-generate-evidence-pack: ready-for-dev
   10-4-compare-properties-same-definitions: ready-for-dev
+
+  # Epic 11 - added 2026-09-04. R1, and 11.1 must precede 1.1.
+  epic-11: backlog
+  11-1-sign-jazzware-operator: ready-for-dev
+  11-2-manage-operator-accounts: ready-for-dev
+  11-3-account-what-operator-did: ready-for-dev
+
+  # Epic 12 - added 2026-09-04. R2, depends on 1.3.
+  epic-12: backlog
+  12-1-turn-second-factor-my-own-account: ready-for-dev
+  12-2-sign-second-factor: ready-for-dev
+  12-3-replace-factor-recover-lost-one: ready-for-dev
+  12-4-require-second-factor-across-my-tenant: ready-for-dev

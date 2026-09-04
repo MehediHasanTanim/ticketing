@@ -28,9 +28,9 @@ All source documents are `status: final`. Nothing upstream is re-decided here; a
 
 ### Functional Requirements
 
-83 FRs across nine feature groups, carried by their original PRD ids. FR-77 to FR-83 were added late (Jazz Core contract tolerance, capability negotiation, discrepancy reporting, floor layout, custom roles, roster import, tenant settings) and FR-1 was amended to split the Jazzware operator from the tenant administrator. Full text is in the PRD §4; each story below cites the FR it satisfies rather than restating it.
+86 FRs across nine feature groups, carried by their original PRD ids. FR-77 to FR-83 were added late (Jazz Core contract tolerance, capability negotiation, discrepancy reporting, floor layout, custom roles, roster import, tenant settings) and FR-1 was amended to split the Jazzware operator from the tenant administrator. **FR-84 to FR-86 were added 2026-09-04** (per-Staff-Member MFA, Tenant-wide MFA enforcement, Jazzware operator authentication) — the last of these is not new product scope so much as a requirement that was always implied, since FR-1 needed an operator to exist and nothing said how one signs in. Full text is in the PRD §4; each story below cites the FR it satisfies rather than restating it.
 
-Group ownership: §4.1 Tenancy and configuration (FR-1..FR-6, FR-81..FR-83) · §4.2 Guest request dispatch (FR-7..FR-18) · §4.3 Housekeeping (FR-19..FR-29, FR-79, FR-80) · §4.4 Engineering (FR-30..FR-39) · §4.5 Incidents and Lost & Found (FR-40..FR-48) · §4.6 Jazz Core integration (FR-49..FR-57, FR-77, FR-78) · §4.7 Mobile foundation (FR-58..FR-64) · §4.8 Notifications (FR-65..FR-68) · §4.9 Reporting (FR-69..FR-76).
+Group ownership: §4.1 Tenancy and configuration (FR-1..FR-6, FR-81..FR-83, FR-84..FR-86) · §4.2 Guest request dispatch (FR-7..FR-18) · §4.3 Housekeeping (FR-19..FR-29, FR-79, FR-80) · §4.4 Engineering (FR-30..FR-39) · §4.5 Incidents and Lost & Found (FR-40..FR-48) · §4.6 Jazz Core integration (FR-49..FR-57, FR-77, FR-78) · §4.7 Mobile foundation (FR-58..FR-64) · §4.8 Notifications (FR-65..FR-68) · §4.9 Reporting (FR-69..FR-76).
 
 ### NonFunctional Requirements
 
@@ -163,8 +163,11 @@ Generated from the story bodies, not asserted: an FR appears here against the ep
 | FR-81 | E1 | 1.4 |
 | FR-82 | E1 | 1.10 |
 | FR-83 | E1 | 1.5, 1.6 |
+| FR-84 | E12 | 12.1, 12.2, 12.3 |
+| FR-85 | E12 | 12.3, 12.4 |
+| FR-86 | E11 | 11.1, 11.2, 11.3 |
 
-**83 of 83** functional requirements map to at least one story; **87 stories** total, of which one (1.0) is scaffolding.
+**86 of 86** functional requirements map to at least one story; **94 stories** total, of which one (1.0) is scaffolding.
 ### Cross-cutting requirements that are release gates, not stories
 
 - **AD-3 / DG-1** — a cross-tenant read attempted through every public interface must fail. Its test suite gates every release, so it is not one story's acceptance criterion.
@@ -175,7 +178,7 @@ Generated from the story bodies, not asserted: an FR appears here against the ep
 
 ## Epic List
 
-Ten epics. Six deliver R1; four carry R2–R4. Each is standalone: it delivers user value on its own and enables later epics without depending on them.
+Twelve epics. Seven deliver R1; five carry R2–R4. Each is standalone: it delivers user value on its own and enables later epics without depending on them — with one declared exception, E11, which exists because Story 1.1 cannot run without it (see **Backlog order vs epic number**).
 
 | Epic | Release | Delivers | FRs |
 |---|---|---|---|
@@ -189,12 +192,14 @@ Ten epics. Six deliver R1; four carry R2–R4. Each is standalone: it delivers u
 | **E8 — Engineering, assets and preventive maintenance** | R3 | Reactive work orders against an asset registry that accumulates history, plus the preventive schedule a busy day would otherwise bury. | 10: FR-30, FR-31, FR-32, FR-33, FR-34, FR-35, FR-37, FR-38, FR-39, FR-72 |
 | **E9 — Incidents, recovery and Lost & Found** | R4 | Service failure gets recorded with a cause and a cost, recovery is approved rather than improvised, and found property has a chain of custody. | 9: FR-40, FR-41, FR-42, FR-43, FR-44, FR-45, FR-46, FR-47, FR-48 |
 | **E10 — Full reporting and evidence** | R4 | The GM dashboard, glitch and recovery reporting, the brand evidence pack, and the corporate cross-property view. | 4: FR-70, FR-73, FR-75, FR-76 |
+| **E11 — The Jazzware operator surface** | R1 | A Jazzware operator can sign in to the internal provisioning surface, onboard a customer and be held accountable for it, with no standing access to customer data. Control plane, its own contract, no operator credential in any cell. | 1: FR-86 |
+| **E12 — Account security** | R2 | A Staff Member can put a second factor on their own account, and a tenant administrator can require one Tenant-wide — without touching the five-second shared-handset sign-in. | 2: FR-84, FR-85 |
 
 ### Ownership and consumption
 
-All 83 functional requirements are owned by **exactly one** epic — no gaps, no requirement owned twice. Verified programmatically rather than by reading.
+All 86 functional requirements are owned by **exactly one** epic — no gaps, no requirement owned twice. Verified programmatically rather than by reading.
 
-Five requirements are *used* by an epic that does not own them. Ownership means the acceptance criteria live there and that epic is done when they pass; a consuming epic depends on the behaviour but adds no criteria of its own for it.
+Eight requirements are *used* by an epic that does not own them. Ownership means the acceptance criteria live there and that epic is done when they pass; a consuming epic depends on the behaviour but adds no criteria of its own for it.
 
 | FR | Owner | Also consumed by | Why the split falls here |
 |---|---|---|---|
@@ -203,12 +208,16 @@ Five requirements are *used* by an epic that does not own them. Ownership means 
 | FR-14 Breach and Escalation | E3 | E5 | Same reason: breach is derived, never stored. E3 decides *that* a job breached; E5 decides *who hears about it*. |
 | FR-18 Open Request views | E3 | E6 | The open and unassigned queues are the dispatch surface a supervisor works from. E6's dashboards read the same data but are specified under FR-69. |
 | FR-60 Push notification | E4 | E5 | The PRD groups push inside the mobile foundation (FR-58–FR-64), and device registration and receipt are client work. E5 owns the routing that decides what gets sent (AD-8). |
+| FR-1 Tenant and Property hierarchy | E1 | E11 | Tenant creation and the time-boxed support-access grant are specified in Story 1.1. E11 provides the operator identity those criteria assume and records the same grant in the operator audit trail, adding no criteria of its own for FR-1. |
+| FR-6 Audit trail | E1 | E11, E12 | The Tenant audit trail is E1's. E11 adds its **counterpart** for the internal surface, and E12 writes enrolment and enforcement changes into E1's — neither redefines what an audit entry is. |
+| FR-83 Tenant settings | E1 | E12 | The Tenant settings surface and its blast-radius display are E1's. Story 12.4's enforcement toggle lives on that surface and inherits its behaviour. |
 
 ### Dependency order within R1
 
 ```mermaid
 graph LR
-  E1[E1 Foundation] --> E3[E3 Dispatch]
+  E11[E11 Operator surface] --> E1[E1 Foundation]
+  E1 --> E3[E3 Dispatch]
   E1 --> E2[E2 Jazz Core]
   E2 --> E3
   E3 --> E4[E4 Handset]
@@ -217,11 +226,16 @@ graph LR
   E5 --> E6
 ```
 
+**E11 precedes E1** — narrowly. Only Story 1.1 depends on it, and only for the operator
+identity its first criterion assumes; the rest of E1 is unaffected, so E11 needs to be
+done before 1.1 runs rather than before E1 starts. E12 is R2 and depends on Story 1.3,
+which provisions the password credential a second factor attaches to.
+
 E1 and E2 can run in parallel from week one. E2 is sequenced early despite being the least visible, because it carries the plan's only external dependency and the R1 demo has no spine without it.
 
 ### Backlog order vs epic number
 
-Within an epic, no story depends on a later story in the same epic. Three stories are exceptions to *epic* order and are called out on the story itself, because their prerequisite lives in a later-numbered epic — for these the backlog position, not the epic number, governs:
+Within an epic, no story depends on a later story in the same epic. Six stories are exceptions to *epic* order and are called out on the story itself, because their prerequisite lives in a later-numbered epic — for these the backlog position, not the epic number, governs:
 
 | Story | Waits for | Why |
 |---|---|---|
@@ -229,8 +243,10 @@ Within an epic, no story depends on a later story in the same epic. Three storie
 | 2.12 Undelivered wake-up call raises a Job | 3.1, 3.2 | Same reason. |
 | 3.9 Staff-raised Request from the handset | 4.1, 4.2 | The FR specifies the mobile surface, which E4 delivers. |
 | 1.7 Configure Departments, Locations and Rooms | 2.5 *(one criterion only)* | Its master-data reconciliation criterion applies only once a Jazz Core connection exists. The story is complete and testable without it; that criterion is verified when 2.5 lands. |
+| 1.1 Provision a Tenant | **11.1** | Its first criterion opens "given I am authenticated as a Jazzware operator". Until 11.1 lands that is a precondition nothing builds, and no Tenant can be provisioned by the documented path. |
+| 12.1–12.4 Account security | 1.3 | A second factor attaches to the password credential Story 1.3 provisions. E12 is R2, so this crosses a release boundary as well as an epic one. |
 
-Nothing else crosses. Every other story's prerequisites sit earlier in its own epic or in an epic the graph above already places before it. Verified programmatically: every inter-story reference in every acceptance criterion was extracted and checked, and the four rows above are the complete set of exceptions.
+Nothing else crosses. Every other story's prerequisites sit earlier in its own epic or in an epic the graph above already places before it. Verified programmatically: every inter-story reference in every acceptance criterion was extracted and checked, and the six rows above are the complete set of exceptions.
 
 ---
 
@@ -2261,25 +2277,221 @@ So that a ranking is not an artefact of different configuration.
 **When** I request data
 **Then** only Properties within my own Tenant are returned (FR-1).
 
+## Epic 11: The Jazzware operator surface
+
+**Goal:** A Jazzware operator can sign in to the internal provisioning surface, onboard a customer, and be held accountable for it — with no standing access to any customer's data. This epic exists because FR-1 has always required an operator to exist and nothing said how one signs in: Story 1.1's first acceptance criterion opens "given I am authenticated as a Jazzware operator", and until this epic lands that is a precondition no story builds. **Release R1**, for that reason rather than for its user value. FRs: FR-86. Three stories.
+
+**It is a different product, not a different screen.** FR-1 puts Tenant creation on a surface the product does not link to, and AD-4 puts the control plane outside the regional cells. So operator identity lives in the control plane, has its **own contract** (`contracts/control-plane-openapi.yaml`), and no operator credential exists in any cell. That separation is what makes FR-1's "provisioning grants Jazzware no standing access" enforceable instead of a promise.
+
+### Story 11.1: Sign in as a Jazzware operator
+
+As a **Jazzware operator**,
+I want to sign in to the internal provisioning surface with my own credential,
+So that provisioning is attributable to me and separate from every hotel-side identity.
+
+**Acceptance Criteria:**
+
+**Given** I hold an active operator account
+**When** I sign in on the internal surface
+**Then** I receive a session scoped to provisioning actions only
+**And** that session grants **no read** of any Tenant's operational or guest data, including through a direct API call with a crafted payload (FR-86, FR-1, AD-11).
+
+**Given** an operator credential
+**When** it is presented to any regional cell endpoint
+**Then** it is refused, because no cell authenticates an operator and no operator credential exists in a cell (FR-86, AD-4).
+
+**Given** any hotel-side identity, including a tenant administrator
+**When** it is presented to the internal provisioning surface
+**Then** it is refused, and the surface reveals nothing about whether the identity exists (FR-86, FR-1).
+
+**Given** my operator account is deactivated
+**When** my session next validates
+**Then** access is lost without a manual step, on the same terms FR-3 sets for a deprovisioned tenant identity (FR-86).
+
+**Given** the internal surface
+**When** I look at it
+**Then** it is visibly not the customer product — different brand and an amber accent rather than petrol — because an internal tool that looks like the customer product is how someone acts in the wrong context (UX `EXPERIENCE-WEB.md.Two audiences, two products`).
+
+### Story 11.2: Manage operator accounts
+
+As a **Jazzware operator administrator**,
+I want to create, scope and deactivate operator accounts,
+So that the people who can create customers are a known and current list.
+
+**Acceptance Criteria:**
+
+**Given** I hold operator-administrator scope
+**When** I create an operator account
+**Then** it is created with provisioning scope only and no access to Tenant data (FR-86)
+**And** the creation is attributed to me in the operator audit trail (FR-86).
+
+**Given** a deployment with no operator accounts
+**When** the control plane starts for the first time
+**Then** the first operator account comes from the platform secret store as part of deployment, never from a self-service sign-up, and its credential must be changed on first use (FR-86, NFR-7).
+
+**Given** an operator account I no longer want active
+**When** I deactivate it
+**Then** it can no longer sign in, its existing sessions end at next validation, and the account is retained for audit rather than deleted (FR-86, FR-6).
+
+**Given** the operator account list
+**When** any hotel-side role attempts to read or change it through any interface
+**Then** the attempt is refused server-side (FR-86, AD-11).
+
+### Story 11.3: Account for what an operator did
+
+As a **Jazzware operator administrator**,
+I want every operator sign-in and provisioning action recorded where a customer's audit trail is not,
+So that internal activity is accountable without putting internal records inside a customer's data.
+
+**Acceptance Criteria:**
+
+**Given** any operator sign-in, Tenant creation, operator-account change or support-access request
+**When** it happens
+**Then** it is recorded in an **operator audit trail** with actor, timestamp and what changed (FR-86, FR-6's counterpart for the internal surface).
+
+**Given** the operator audit trail
+**When** any entry is written or read
+**Then** it carries no guest-identifying data, because the control plane holds none (FR-86, AD-4, AD-10).
+
+**Given** a time-boxed support-access grant into a Tenant
+**When** it is requested, approved, used or expires
+**Then** it appears in **both** the operator audit trail and that Tenant's own audit trail, because the customer must be able to see it without asking Jazzware (FR-1, owned by Story 1.1).
+
+**Given** an operator audit entry
+**When** anyone attempts to alter or remove it
+**Then** the attempt fails, on the same append-only terms as the Tenant audit trail (FR-6, FR-86).
+
+---
+
+## Epic 12: Account security — a second factor people choose
+
+**Goal:** A Staff Member can put a second factor on their own account, and a tenant administrator can require one across the Tenant, without either decision touching the shared handset a room attendant signs in to in five seconds. **Release R2.** FRs: FR-84, FR-85. Four stories.
+
+**Scope boundary that shapes every story here.** MFA applies to the **password credential only.** An identity governed by a connected identity provider authenticates under that provider's policy (FR-3) and gets no second challenge from us; a **PIN or badge on a Shared Device is out of scope**, because a second factor cannot be reconciled with a five-second sign-in on a shared device in a corridor (FR-4, NFR-5) — the credential-scope rule in FR-4 is the control that applies there. Two methods exist: a one-time code by email, and an authenticator app (TOTP, RFC 6238). *Google Authenticator and Microsoft Authenticator are both TOTP apps consuming the same enrolment secret*, so they are two labels on one method and not two integrations.
+
+### Story 12.1: Turn on a second factor for my own account
+
+As a **Staff Member who signs in with a password**,
+I want to add a second factor from Settings and pick how it reaches me,
+So that my account is not one password away from someone else's hands.
+
+**Acceptance Criteria:**
+
+**Given** I sign in with a password and have no second factor
+**When** I open Settings
+**Then** multi-factor authentication is **off**, and I can turn it on myself (FR-84).
+
+**Given** I am enrolling
+**When** I choose a method
+**Then** I can choose a one-time code by **email**, or an **authenticator app** offered as both Google Authenticator and Microsoft Authenticator — both of which enrol from the same secret, so a code from either is accepted (FR-84).
+
+**Given** I have scanned or entered an enrolment secret
+**When** I have not yet submitted a code produced by it
+**Then** the factor is **not** active, so a mis-scanned code cannot lock me out of my own account (FR-84).
+
+**Given** enrolment succeeds
+**When** the audit trail is read
+**Then** it records that I enrolled, which method, and when — and never the secret or a code (FR-84, FR-6).
+
+**Given** I hold both an email method and an app method
+**When** I sign in
+**Then** I choose which to use, and the app method is offered first because it works without a mailbox (FR-84).
+
+### Story 12.2: Sign in with a second factor
+
+As a **Staff Member with a second factor enrolled**,
+I want the extra step to be quick and to fail safely,
+So that security does not become the reason I cannot start work.
+
+**Acceptance Criteria:**
+
+**Given** I have a factor enrolled
+**When** my password is accepted
+**Then** I am not signed in yet: I receive a **challenge**, and only a correct code completes it and returns a session (FR-84, AD-11).
+
+**Given** a challenge
+**When** it is unanswered past its lifetime, or answered wrongly too many times
+**Then** it expires and the sign-in restarts, and the response does not reveal whether the password or the code was the problem to anyone but me (FR-84).
+
+**Given** an email one-time code
+**When** it is issued
+**Then** it is single-use and short-lived, it is never written to a log, and requesting another invalidates the previous one (FR-84, NFR-7).
+
+**Given** an identity governed by a connected identity provider, or a PIN or badge on a Shared Device
+**When** it signs in
+**Then** no second challenge is added by JazzTicketing, and shared-device sign-in still completes in under five seconds (FR-84, FR-3, FR-4, NFR-5).
+
+### Story 12.3: Replace a factor, or recover a lost one
+
+As a **Staff Member who has changed or lost my phone**,
+I want a way back into my own account that does not weaken the factor,
+So that losing a device is an inconvenience rather than an incident.
+
+**Acceptance Criteria:**
+
+**Given** I am signed in
+**When** I remove or replace a factor in Settings
+**Then** the change takes effect immediately, is attributed in the audit trail, and — if it was my last factor while my Tenant requires MFA — I am required to enrol another before I can continue (FR-84, FR-85).
+
+**Given** I have lost my only second factor
+**When** I ask for help
+**Then** an administrator with scope over me can issue a **reset of the factor**, which is attributed to that administrator in the audit trail (FR-84, FR-6)
+**And** there is no self-service path that simply bypasses the factor (FR-84).
+
+**Given** a factor reset
+**When** it is issued
+**Then** it does not reveal a code or a secret to the administrator, and it ends my other sessions so a session opened with the old factor cannot outlive it (FR-84, FR-64).
+
+### Story 12.4: Require a second factor across my Tenant
+
+As a **tenant administrator**,
+I want to require multi-factor authentication for everyone who signs in with a password,
+So that our own security policy is enforced by the product rather than by asking people nicely.
+
+**Acceptance Criteria:**
+
+**Given** I am a tenant administrator
+**When** I switch on the MFA requirement
+**Then** it applies to my Tenant only, never globally, and sits with the other Tenant defaults whose blast radius is displayed (FR-85, FR-83).
+
+**Given** I am switching it on
+**When** no tenant administrator in my Tenant has an enrolled factor
+**Then** the switch is refused server-side, because a Tenant that locks out its own administrators has no way back in (FR-85, AD-11).
+
+**Given** the requirement is on and a grace period I set
+**When** an unenrolled Staff Member signs in during the grace period
+**Then** they are prompted to enrol and can complete it
+**And** after the grace period, password sign-in without an enrolled factor is refused **server-side**, not merely hidden (FR-85, AD-11).
+
+**Given** that refusal
+**When** it reaches the person signing in
+**Then** it tells **them** that enrolment is what is missing rather than implying a wrong password, while telling an unauthenticated caller nothing about whether the account exists (FR-85).
+
+**Given** any change to the requirement or the grace period
+**When** it is made
+**Then** it is attributed to me with a timestamp in the audit trail (FR-85, FR-6).
+
 ---
 
 ## Step 4 — Final validation
 
 Run 2026-09-02 against the checks the workflow mandates, then re-run after Tanim's two decisions were applied. Every count below was computed from the document, not read off it.
 
-**Final shape: 10 epics, 87 stories** — E1 12 · E2 13 · E3 11 · E4 8 · E5 4 · E6 5 · E7 11 · E8 10 · E9 9 · E10 4. One story (1.0) is scaffolding and carries no FR.
+**Final shape: 12 epics, 94 stories** — E1 12 · E2 13 · E3 11 · E4 8 · E5 4 · E6 5 · E7 11 · E8 10 · E9 9 · E10 4 · E11 3 · E12 4. One story (1.0) is scaffolding and carries no FR.
+
+**Amended 2026-09-04** at Tanim's direction: E11 (the Jazzware operator surface, R1, FR-86) and E12 (account security, R2, FR-84–FR-85) were added, and every count, table and graph below was **recomputed from the document** rather than edited to match. E11 closes a hole rather than adding scope — Story 1.1's first criterion assumed an authenticated Jazzware operator that no requirement specified and no story built.
 
 ### Passed
 
 | Check | Result |
 |---|---|
-| FR coverage | **83 / 83.** Every owned FR maps to at least one story whose acceptance criteria cite it. The FR Coverage Map above is generated from the story bodies, so it cannot drift from them silently. |
-| FR exclusivity | Each FR is owned by exactly one epic; 0 gaps, 0 duplicates. The five consumed-elsewhere requirements are declared with their owner. |
-| Story format | 87 / 87 stories carry the As-a / I-want / So-that form, an Acceptance Criteria header, and at least two Given/When/Then blocks. |
+| FR coverage | **86 / 86.** Every owned FR maps to at least one story whose acceptance criteria cite it. The FR Coverage Map above is generated from the story bodies, so it cannot drift from them silently. Re-verified after the 2026-09-04 amendment: 0 gaps. |
+| FR exclusivity | Each FR is owned by exactly one epic; 0 gaps, 0 duplicates, recomputed over all 86. The **eight** consumed-elsewhere requirements are declared with their owner. |
+| Story format | 94 / 94 stories carry the As-a / I-want / So-that form, an Acceptance Criteria header, and at least two Given/When/Then blocks. |
 | Within-epic dependencies | 0 forward references. No story depends on a later story in its own epic. |
-| Cross-epic dependencies | 4, all declared in **Backlog order vs epic number**, extracted programmatically rather than by reading. |
+| Cross-epic dependencies | 6, all declared in **Backlog order vs epic number**, extracted programmatically rather than by reading. One of them (1.1 waits for 11.1) is why E11 is R1. |
 | Entity creation | No story creates schema it does not use. Story 1.0 creates the cell and the gates but **no domain schema**; there is no "create all the tables" story; the Room aggregate arrives in 2.1, Jobs in 3.1, Assets in 8.2, Glitches in 9.1, each with the story that first needs it. |
-| Epic value | Every epic delivers user-visible capability. None is a technical milestone. |
+| Epic value | Every epic delivers user-visible capability. None is a technical milestone — E11's user is a Jazzware operator rather than a hotel employee, which is a different audience, not an absent one. |
 | UX-DR coverage | All six design requirements appear as acceptance criteria on client stories rather than as a polish epic. |
 
 ### Findings raised, and how Tanim resolved them
@@ -2309,5 +2521,5 @@ This document is now the build substrate. Downstream rules:
 - **Three gates precede all feature work.** Story 1.0 exists so that cross-tenant isolation, the two-language SLA fixture suite and the contract-codegen drift check are running before any story can claim to pass them.
 - **The stack versions are still unverified.** Confirming them is inside Story 1.0's scope. Nothing downstream should treat the Stack table as settled until that story closes.
 
-Next: `bmad-create-story` on **Story 1.0**, then R1 with E1 and E2 in parallel.
+Next: **11.1 before 1.1**, then R1 with E1 and E2 in parallel. E12 lands in R2.
 

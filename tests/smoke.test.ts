@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { start, auth, type Harness } from './harness';
 import { rebuildProjections } from '../app/src/rebuild-projections';
 import { OPENAPI_DOCUMENT } from '../contracts/generated/ts/openapi';
+import { CONTROL_PLANE_OPENAPI_DOCUMENT } from '../contracts/generated/ts/control-plane-openapi';
 
 /**
  * AC-5: "it runs" has to be machine-checkable. Health plus one command all the way
@@ -131,6 +132,10 @@ describe('cell smoke test', () => {
       // credential, or proves control of a mailbox in order to set one.
       '/auth/sign-in', '/auth/credential/set-up',
       '/auth/password/forgot', '/auth/password/reset',
+      // The second factor's challenge endpoints. The challenge token is NOT a
+      // bearer token - it travels in the body with its own audience and no scope -
+      // so these carry no session and cannot require one.
+      '/auth/mfa/challenge/verify', '/auth/mfa/challenge/resend',
     ]);
     const actuallyPublic = new Set<string>();
     for (const [path, ops] of Object.entries(doc.paths as Record<string, Record<string, { security?: unknown[] }>>)) {
@@ -158,11 +163,11 @@ describe('cell smoke test', () => {
         if (op['x-implemented'] === false) unbuilt.push({ method, path, story: op['x-story'] });
       }
     }
-    // The thirteen auth operations, and nothing else - a Story 1.0 operation
-    // marked unbuilt would mean something shipped that the spec says does not
-    // exist. This number goes DOWN as 1.3, 1.5, 4.1 and 4.8 land, and changing it
-    // is meant to be a deliberate edit rather than a silent one.
-    expect(unbuilt).toHaveLength(13);
+    // The twenty auth operations, and nothing else - a Story 1.0 operation marked
+    // unbuilt would mean something shipped that the spec says does not exist. This
+    // number goes DOWN as 1.3, 1.5, 4.1, 4.8 and Epic 12 land, and changing it is
+    // meant to be a deliberate edit rather than a silent one.
+    expect(unbuilt).toHaveLength(20);
     expect(unbuilt.every((o) => o.path.startsWith('/auth/'))).toBe(true);
 
     // And the converse, which is the assertion that actually bites: an operation
@@ -197,6 +202,39 @@ describe('cell smoke test', () => {
         // Retrying does not build the feature.
         expect(body.retryable).toBe(false);
         expect(body.details?.story, `${method} ${path} must name its owner`).toBe(story);
+      }
+    }
+  });
+
+  it('keeps the cell and the control plane apart, and serves only the cell', async () => {
+    // FR-1 puts Tenant creation on a Jazzware-internal surface the product does not
+    // link to, and AD-4 puts the control plane outside the regional cells. The
+    // drift gate checks the two DOCUMENTS do not overlap; this checks the running
+    // cell does not serve the internal one, which is the half a document cannot
+    // prove about itself.
+    const cell = OPENAPI_DOCUMENT as unknown as { paths: Record<string, unknown> };
+    const control = CONTROL_PLANE_OPENAPI_DOCUMENT as unknown as {
+      paths: Record<string, unknown>;
+      servers: Array<{ url: string }>;
+      components: { securitySchemes: Record<string, unknown> };
+    };
+
+    // Separate credential, not one scheme shared by both surfaces: an operator
+    // token must be structurally unusable against a cell, not merely unauthorised.
+    expect(Object.keys(control.components.securitySchemes)).toEqual(['operatorBearerAuth']);
+    expect(control.servers[0]?.url).not.toBe('/v1');
+    for (const path of Object.keys(control.paths)) {
+      expect(Object.keys(cell.paths), `${path} must not be in the cell document`).not.toContain(path);
+    }
+
+    // And the cell serves none of it - not a 501 either, because a 501 would say
+    // "coming here soon", which is the opposite of what AD-4 decided.
+    for (const path of ['/v1/operator/sign-in', '/v1/operator/session', '/v1/tenants']) {
+      for (const method of ['GET', 'POST']) {
+        const res = await fetch(`${h.base}${path}`, {
+          method, headers: auth(h.tokenA), ...(method === 'POST' ? { body: '{}' } : {}),
+        });
+        expect(res.status, `${method} ${path}`).toBe(404);
       }
     }
   });

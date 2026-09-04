@@ -17,6 +17,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { parse as parseYaml } from 'yaml';
 import { join, relative } from 'node:path';
 
 const GENERATED = join('contracts', 'generated');
@@ -108,6 +109,43 @@ if (offenders.length) {
     for (const g of gaps) console.log(`                       ${g}`);
   } else {
     console.log(`  codegen-drift  PASS  ${codes.length} error codes translated in ${locales.length} languages`);
+  }
+}
+
+// 4. The two OpenAPI documents describe two SURFACES, and must not bleed together.
+//    FR-1 puts Tenant creation on a Jazzware-internal surface the product does not
+//    link to; AD-4 puts the control plane outside the regional cells. If an operator
+//    path appears in the cell document, or a cell path in the control-plane document,
+//    then FR-1's "provisioning grants Jazzware no standing access to tenant data"
+//    stops being enforceable and becomes a promise. Cheap to check, expensive to
+//    discover later.
+{
+  const load = (f) => parseYaml(readFileSync(join('contracts', f), 'utf8'));
+  const cell = load('openapi.yaml');
+  const control = load('control-plane-openapi.yaml');
+  const problems = [];
+
+  const shared = Object.keys(cell.paths).filter((p) => p in control.paths);
+  if (shared.length) problems.push(`both documents declare: ${shared.join(', ')}`);
+
+  for (const p of Object.keys(cell.paths)) {
+    if (/^\/(operator|tenants)\b/.test(p)) problems.push(`cell document declares an internal path: ${p}`);
+  }
+  for (const p of Object.keys(control.paths)) {
+    if (/^\/(auth|commands|fixture-notes|sla)\b/.test(p)) problems.push(`control-plane document declares a cell path: ${p}`);
+  }
+  // Separate credentials, not one scheme shared by both surfaces.
+  const cellSchemes = Object.keys(cell.components?.securitySchemes ?? {});
+  const ctrlSchemes = Object.keys(control.components?.securitySchemes ?? {});
+  const bothSchemes = cellSchemes.filter((n) => ctrlSchemes.includes(n));
+  if (bothSchemes.length) problems.push(`both documents use the same security scheme: ${bothSchemes.join(', ')}`);
+
+  if (problems.length) {
+    failed = true;
+    console.log('  codegen-drift  FAIL  the cell and control-plane surfaces have bled together:');
+    for (const p of problems) console.log(`                       ${p}`);
+  } else {
+    console.log(`  codegen-drift  PASS  cell and control-plane documents stay separate (${Object.keys(cell.paths).length} + ${Object.keys(control.paths).length} paths, no overlap)`);
   }
 }
 
