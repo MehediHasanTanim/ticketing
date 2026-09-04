@@ -125,8 +125,27 @@ if (offenders.length) {
   const control = load('control-plane-openapi.yaml');
   const problems = [];
 
-  const shared = Object.keys(cell.paths).filter((p) => p in control.paths);
-  if (shared.length) problems.push(`both documents declare: ${shared.join(', ')}`);
+  // RESOLVED urls, not path templates. Both surfaces legitimately declare `/docs`
+  // and `/openapi.json` - each documents itself - and those are different URLs
+  // because the documents carry different `servers` prefixes (`/v1` and
+  // `/control/v1`). This check fired on that the first time and was right to: the
+  // question is whether any URL is served by both surfaces, which is what it now
+  // asks. Refined rather than suppressed, and the prefixes are asserted below so
+  // the refinement cannot be quietly undone by making them equal.
+  const prefixOf = (doc, name) => {
+    const url = doc.servers?.[0]?.url;
+    if (!url) problems.push(`${name} document declares no servers[0].url, so its paths resolve nowhere`);
+    return url ?? '';
+  };
+  const cellPrefix = prefixOf(cell, 'cell');
+  const ctrlPrefix = prefixOf(control, 'control-plane');
+  if (cellPrefix && cellPrefix === ctrlPrefix) {
+    problems.push(`both documents are served at ${cellPrefix} - the prefixes are what make their paths distinct`);
+  }
+  const resolved = (prefix, paths) => new Set(Object.keys(paths).map((p) => prefix + p));
+  const cellUrls = resolved(cellPrefix, cell.paths);
+  const shared = [...resolved(ctrlPrefix, control.paths)].filter((u) => cellUrls.has(u));
+  if (shared.length) problems.push(`both surfaces serve: ${shared.join(', ')}`);
 
   for (const p of Object.keys(cell.paths)) {
     if (/^\/(operator|tenants)\b/.test(p)) problems.push(`cell document declares an internal path: ${p}`);

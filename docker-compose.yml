@@ -103,6 +103,11 @@ services:
       # operator-auth.ts is what still separates them if these are ever set alike -
       # negative control 23 proves it.
       CONTROL_PLANE_TOKEN_SECRET: ${CONTROL_PLANE_TOKEN_SECRET:-}
+      # Swagger UI for the INTERNAL surface, at /control/v1/docs. Off unless set to
+      # 1, unlike the cell's: FR-1 makes non-advertisement a property of this
+      # surface, so publishing its shape is a deliberate act rather than a default.
+      # On here so whoever builds the internal frontend has the docs locally.
+      CONTROL_PLANE_DOCS: ${CONTROL_PLANE_DOCS:-1}
       REDIS_URL: redis://redis:6379
       # Story 1.0 only, and off unless a developer opts in. Story 1.5 removes it.
       FIXTURE_AUTH: ${FIXTURE_AUTH:-0}

@@ -8,6 +8,9 @@ import {
 } from '../../../app/src/tenant/provision-tenant';
 import { ValidationError, ConflictError } from '../../../core/src/tenant/provision';
 import { envelope, statusFor, type ErrorCode } from '../errors';
+import {
+  CONTROL_PLANE_DOCS, serveDocsAsset, serveDocsPage, serveOpenApiDocument,
+} from '../docs';
 
 /**
  * THE JAZZWARE-INTERNAL SURFACE (Stories 11.1 and 1.1).
@@ -70,6 +73,28 @@ export async function handleControlPlane(
   const method = req.method ?? 'GET';
 
   try {
+    // ---- documentation, for whoever builds the internal surface ---------------
+    // Same self-hosted Swagger UI as the cell's, from THIS document, with an amber
+    // banner rather than petrol so nobody mistakes one surface for the other. OFF
+    // by default (see CONTROL_PLANE_DOCS): FR-1 makes non-advertisement a property
+    // of this surface, so publishing its shape has to be switched on deliberately.
+    //
+    // Disabled means GONE, not "needs a credential" - the same reasoning that made
+    // the cell's disabled docs answer 404 instead of sending a reader to look for a
+    // token that would not have helped.
+    const isDocs = path === '/docs' || path === '/docs/' || path === '/openapi.json'
+      || path.startsWith('/docs/assets/');
+    if (isDocs) {
+      if (!CONTROL_PLANE_DOCS.enabled()) return fail(res, 'not_found');
+      if (method === 'GET' || method === 'HEAD') {
+        if (path === '/openapi.json') { serveOpenApiDocument(res, method, CONTROL_PLANE_DOCS); return true; }
+        if (path === '/docs' || path === '/docs/') { serveDocsPage(res, method, CONTROL_PLANE_DOCS); return true; }
+        const asset = /^\/docs\/assets\/(.*)$/.exec(path);
+        if (asset) { serveDocsAsset(decodeURIComponent(asset[1] ?? ''), req, res); return true; }
+      }
+      return fail(res, 'not_found');
+    }
+
     // ---- sign-in: the one route that needs no operator credential -------------
     if (method === 'POST' && path === '/operator/sign-in') {
       const body = await readBody(req);

@@ -26,6 +26,10 @@ servers:
     description: The control plane. Never a cell, and never served on a cell's origin.
 
 tags:
+  - name: docs
+    description: >-
+      This surface's own description, served from contracts/ - the schema of record.
+      Off unless CONTROL_PLANE_DOCS=1.
   - name: operator-auth
     description: How a Jazzware operator signs in. FR-86, Story 11.1.
   - name: operator-accounts
@@ -44,6 +48,48 @@ security:
   - operatorBearerAuth: []
 
 paths:
+  /openapi.json:
+    get:
+      operationId: getControlPlaneOpenApiDocument
+      tags: [docs]
+      security: []
+      summary: This document, as JSON
+      description: >-
+        Generated from `contracts/control-plane-openapi.yaml` and compiled into the
+        artifact, so it cannot drift from the bindings a client is generated from.
+        Served only when `CONTROL_PLANE_DOCS=1`, which is OFF by default: FR-1 makes
+        non-advertisement a property of this surface, so publishing its shape is a
+        deliberate act rather than a default. `API_DOCS=0` turns it off regardless.
+      responses:
+        "200":
+          description: the OpenAPI 3.1 document
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "404":
+          description: docs disabled
+  /docs:
+    get:
+      operationId: getControlPlaneApiDocs
+      tags: [docs]
+      security: []
+      summary: Swagger UI for the internal surface
+      description: >-
+        The same self-hosted Swagger UI as the cell's - no CDN, so it works
+        air-gapped and loads no third-party script into an authenticated origin -
+        serving THIS document, with an amber banner rather than petrol. The colour is
+        not decoration: the UX spine gives the internal surface an amber accent
+        "because an internal tool that looks like the customer product is how someone
+        acts in the wrong context", and a docs page is the easiest place for two
+        surfaces to be mistaken for each other.
+      responses:
+        "200":
+          description: an HTML page
+          content:
+            text/html:
+              schema: { type: string }
+        "404":
+          description: docs disabled
   /operator/sign-in:
     post:
       operationId: operatorSignIn

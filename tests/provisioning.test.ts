@@ -304,6 +304,75 @@ describe('the Jazzware-internal surface, and provisioning', () => {
     } finally { await c.end(); }
   });
 
+  // ---------------------------------------------------------------- its own docs
+
+  it('serves its own Swagger UI and document, and only when switched on', async () => {
+    const saved = process.env.CONTROL_PLANE_DOCS;
+    try {
+      // OFF by default - FR-1 makes non-advertisement a property of this surface,
+      // so a reader gets 404 rather than a token prompt for a page no credential
+      // would have opened.
+      delete process.env.CONTROL_PLANE_DOCS;
+      for (const path of ['/control/v1/docs', '/control/v1/openapi.json', '/control/v1/docs/assets/swagger-ui.css']) {
+        expect((await fetch(`${h.base}${path}`)).status, `${path} with docs off`).toBe(404);
+      }
+
+      process.env.CONTROL_PLANE_DOCS = '1';
+      const doc = await fetch(`${h.base}/control/v1/openapi.json`);
+      expect(doc.status).toBe(200);
+      const served = await doc.json() as { info: { title: string }; paths: Record<string, unknown> };
+      expect(served.info.title).toMatch(/Control Plane/);
+
+      const page = await fetch(`${h.base}/control/v1/docs`);
+      expect(page.status).toBe(200);
+      const html = await page.text();
+      expect(page.headers.get('content-security-policy')).toContain("default-src 'none'");
+      expect(html).not.toMatch(/https?:\/\/(unpkg|cdn|jsdelivr)/i);
+      // Amber, not petrol: the UX spine's rule that an internal tool must not look
+      // like the customer product, applied where the two are easiest to confuse.
+      expect(html).toContain('#A8490B');
+      expect(html).not.toContain('#27565D');
+      expect(html).toContain('contracts/control-plane-openapi.yaml');
+
+      for (const asset of ['swagger-ui.css', 'swagger-ui-bundle.js', 'swagger-ui-standalone-preset.js']) {
+        expect((await fetch(`${h.base}/control/v1/docs/assets/${asset}`)).status, asset).toBe(200);
+      }
+      // The same narrow allowlist as the cell's, not an extension match.
+      for (const blocked of ['index.js', 'package.json', 'absolute-path.js']) {
+        expect((await fetch(`${h.base}/control/v1/docs/assets/${blocked}`)).status, blocked).toBe(404);
+      }
+      // HEAD works wherever GET does, or an uptime check goes red for no reason.
+      for (const path of ['/control/v1/docs', '/control/v1/openapi.json']) {
+        expect((await fetch(`${h.base}${path}`, { method: 'HEAD' })).status, path).toBe(200);
+      }
+    } finally {
+      if (saved === undefined) delete process.env.CONTROL_PLANE_DOCS;
+      else process.env.CONTROL_PLANE_DOCS = saved;
+    }
+  });
+
+  it('never serves one surface\'s document under the other\'s prefix', async () => {
+    // The invariant the whole two-document split rests on, at the layer where the
+    // two surfaces look most alike. A docs page is the easiest place for them to
+    // bleed together, because it is the one place they are the same KIND of thing.
+    const saved = process.env.CONTROL_PLANE_DOCS;
+    process.env.CONTROL_PLANE_DOCS = '1';
+    try {
+      const cell = await (await fetch(`${h.base}/v1/openapi.json`)).json() as { info: { title: string }; paths: Record<string, unknown> };
+      const control = await (await fetch(`${h.base}/control/v1/openapi.json`)).json() as { info: { title: string }; paths: Record<string, unknown> };
+
+      expect(cell.info.title).not.toMatch(/Control Plane/);
+      expect(control.info.title).toMatch(/Control Plane/);
+      // No operator or provisioning path in what the cell publishes...
+      expect(Object.keys(cell.paths).filter((p) => /^\/(operator|tenants)\b/.test(p))).toEqual([]);
+      // ...and no cell path in what the internal surface publishes.
+      expect(Object.keys(control.paths).filter((p) => /^\/(auth|commands|fixture-notes|sla|health)\b/.test(p))).toEqual([]);
+    } finally {
+      if (saved === undefined) delete process.env.CONTROL_PLANE_DOCS;
+      else process.env.CONTROL_PLANE_DOCS = saved;
+    }
+  });
+
   // ---------------------------------------------------------- privilege boundary
 
   it('gives the control-plane role no access to the cell, and no read of the outbox', async () => {

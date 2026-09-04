@@ -9,6 +9,46 @@
  */
 
 export interface paths {
+    "/openapi.json": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * This document, as JSON
+         * @description Generated from `contracts/control-plane-openapi.yaml` and compiled into the artifact, so it cannot drift from the bindings a client is generated from. Served only when `CONTROL_PLANE_DOCS=1`, which is OFF by default: FR-1 makes non-advertisement a property of this surface, so publishing its shape is a deliberate act rather than a default. `API_DOCS=0` turns it off regardless.
+         */
+        get: operations["getControlPlaneOpenApiDocument"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/docs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Swagger UI for the internal surface
+         * @description The same self-hosted Swagger UI as the cell's - no CDN, so it works air-gapped and loads no third-party script into an authenticated origin - serving THIS document, with an amber banner rather than petrol. The colour is not decoration: the UX spine gives the internal surface an amber accent "because an internal tool that looks like the customer product is how someone acts in the wrong context", and a docs page is the easiest place for two surfaces to be mistaken for each other.
+         */
+        get: operations["getControlPlaneApiDocs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/operator/sign-in": {
         parameters: {
             query?: never;
@@ -356,6 +396,62 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    getControlPlaneOpenApiDocument: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description the OpenAPI 3.1 document */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description docs disabled */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getControlPlaneApiDocs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description an HTML page */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            /** @description docs disabled */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     operatorSignIn: {
         parameters: {
             query?: never;

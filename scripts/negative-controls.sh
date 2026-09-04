@@ -264,6 +264,20 @@ expect_red "cross-surface tokens, shared secret defeated by the audience check" 
     process.exit(1);
   '
 
+echo "== 24. docs surfaces: serve the INTERNAL document under the cell's prefix =="
+# A docs page is the easiest place for the two surfaces to bleed together, because
+# it is the one place they are the same KIND of thing. If /v1/docs ever publishes
+# the Jazzware-internal API, every hotel customer can read it.
+cp edge/src/docs.ts /tmp/docs.nc.bak
+python3 - <<'PY2'
+import pathlib
+p = pathlib.Path('edge/src/docs.ts'); t = p.read_text()
+p.write_text(t.replace("  document: OPENAPI_DOCUMENT,", "  document: CONTROL_PLANE_OPENAPI_DOCUMENT,", 1))
+PY2
+CONTROL_PLANE_DOCS=1 expect_red "docs surfaces, internal document under the cell prefix" \
+  npx vitest run tests/provisioning.test.ts
+cp /tmp/docs.nc.bak edge/src/docs.ts
+
 echo
 echo "negative controls: ${pass} correctly went red, ${fail} did not, ${unverified} unverifiable here"
 [ "${fail}" -eq 0 ]

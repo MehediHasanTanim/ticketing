@@ -149,6 +149,26 @@ describe('cell smoke test', () => {
     expect([...actuallyPublic].sort()).toEqual([...MAY_BE_PUBLIC].sort());
   });
 
+  it('keeps the control-plane document to its own closed set of public operations', async () => {
+    // The internal surface has far fewer reasons to be public than the cell, and
+    // the ones it has are exact: how an operator obtains a credential, and its own
+    // description. Anything else opting out of `operatorBearerAuth` is a mistake.
+    const control = CONTROL_PLANE_OPENAPI_DOCUMENT as unknown as {
+      security: unknown; paths: Record<string, Record<string, { security?: unknown[] }>>;
+    };
+    expect(control.security).toEqual([{ operatorBearerAuth: [] }]);
+    const MAY_BE_PUBLIC = new Set(['/operator/sign-in', '/openapi.json', '/docs']);
+    const actuallyPublic = new Set<string>();
+    for (const [path, ops] of Object.entries(control.paths)) {
+      for (const op of Object.values(ops)) {
+        if (op.security === undefined) continue;
+        expect(op.security, `${path}: the only reason to set security is to opt out`).toEqual([]);
+        actuallyPublic.add(path);
+      }
+    }
+    expect([...actuallyPublic].sort()).toEqual([...MAY_BE_PUBLIC].sort());
+  });
+
   it('is honest about what is designed but not built - every unbuilt operation 501s with its story', async () => {
     // The auth surface is designed ahead of the stories that build it
     // (docs/decisions/0002). The risk that creates is a spec that advertises an
@@ -222,10 +242,24 @@ describe('cell smoke test', () => {
     // Separate credential, not one scheme shared by both surfaces: an operator
     // token must be structurally unusable against a cell, not merely unauthorised.
     expect(Object.keys(control.components.securitySchemes)).toEqual(['operatorBearerAuth']);
-    expect(control.servers[0]?.url).not.toBe('/v1');
+
+    // RESOLVED urls, not path templates. Both surfaces legitimately declare
+    // `/docs` and `/openapi.json` - each documents itself - and those are
+    // different URLs because the two documents carry different `servers`
+    // prefixes. This assertion compared templates at first and failed on exactly
+    // that, correctly: what matters is that no URL is served by both, and that
+    // the prefixes which make them distinct are actually distinct.
+    const cellPrefix = (cell as unknown as { servers: Array<{ url: string }> }).servers[0]?.url ?? '';
+    const ctrlPrefix = control.servers[0]?.url ?? '';
+    expect(cellPrefix).toBe('/v1');
+    expect(ctrlPrefix).not.toBe(cellPrefix);
+    const cellUrls = new Set(Object.keys(cell.paths).map((p) => cellPrefix + p));
     for (const path of Object.keys(control.paths)) {
-      expect(Object.keys(cell.paths), `${path} must not be in the cell document`).not.toContain(path);
+      expect(cellUrls, `${ctrlPrefix}${path} is also served by the cell`).not.toContain(ctrlPrefix + path);
     }
+    // And the sharper version: no operator or provisioning path in the cell
+    // document at all, whatever prefix it might be given.
+    expect(Object.keys(cell.paths).filter((p) => /^\/(operator|tenants)\b/.test(p))).toEqual([]);
 
     // And the cell serves none of it - not a 501 either, because a 501 would say
     // "coming here soon", which is the opposite of what AD-4 decided.

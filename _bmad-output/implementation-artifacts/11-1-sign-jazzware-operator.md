@@ -144,9 +144,26 @@ would actually produce.
 session's `revoked_at` are read on every request, which is what "at next token
 validation, without a manual step" means.
 
+**Added after the story, at Tanim's request:** the internal surface serves its own
+Swagger UI at `/control/v1/docs` and its document at `/control/v1/openapi.json`,
+from `contracts/control-plane-openapi.yaml`. Whoever builds the internal frontend
+had no rendered documentation for the API they are calling - only the YAML - and
+`edge/src/docs.ts` served the cell's document alone.
+
+It is gated **separately and off by default** (`CONTROL_PLANE_DOCS=1`), unlike the
+cell's, which defaults on. That difference is deliberate rather than inconsistent:
+FR-1 makes non-advertisement a property of this surface, so a default that publishes
+an internal API's shape because nobody set a variable is the wrong way round.
+`API_DOCS=0` still turns both off. The banner is **amber (`#A8490B`, DESIGN.md's
+existing `state-due` token, 5.8:1 on white) rather than petrol** - the UX spine's
+W35 rule applied at the layer where the two surfaces are most easily confused,
+because a docs page is the one place they are the same kind of thing. The real W35
+accent token is still the UX spine's to define.
+
 **NOT built - the remaining part of this story:** AC-5, the internal surface's
-appearance (different brand, amber accent, W35). It is a console surface and no
-console work is in this change.
+appearance as an application (different brand, different navigation, W35). It is a
+console surface and no console work is in this change; the amber docs banner is not
+that surface.
 
 **REPORTED DEVIATIONS, both raised rather than absorbed:**
 
