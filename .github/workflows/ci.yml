@@ -4,9 +4,25 @@ name: ci
 # Every job here can fail the build on its own. scripts/negative-controls.sh
 # proves each one can go red - a gate that has never failed is not known to work.
 
+# CI IS DISABLED, deliberately and reversibly (Tanim, 2026-09-04, before the first
+# push). `workflow_dispatch` is the only trigger, so nothing runs on a push or a
+# pull request, but the workflow stays in the repository, stays reviewable, and can
+# be run on demand from the Actions tab.
+#
+# TO RE-ENABLE: restore the two lines below this block. Nothing else about the
+# workflow changed, so re-enabling is a two-line diff rather than a rewrite.
+#
+#   push: { branches: [main] }
+#   pull_request:
+#
+# Worth knowing before you do: the `container-images` job has NEVER run. Story 1.0's
+# images were only ever built on substituted bases because every container registry
+# was blocked here (docs/running-containers-without-a-registry.md), so that job is
+# the first honest test of both Dockerfiles against the real `node:22-alpine` and
+# `nginx:1.27-alpine`. Expect it to be the one that fails first, and treat that as
+# the job doing its job.
 on:
-  push: { branches: [main] }
-  pull_request:
+  workflow_dispatch:
 
 env:
   CELL_NAME: ci-eu-west-1
