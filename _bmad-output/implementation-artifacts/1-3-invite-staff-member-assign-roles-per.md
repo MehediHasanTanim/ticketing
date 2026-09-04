@@ -52,11 +52,26 @@ So that what they can see and act on is decided before they ever sign in.
 
 **Prerequisites:** 1.1, 1.2. Consumed by 4.1 (which uses the PIN credential this story creates).
 
-**The wire contract already exists.** `GET /auth/session` and `POST /auth/context` are
-designed in `contracts/openapi.yaml`, marked `x-story: "1.3"` / `x-implemented: false`,
-and today answer 501 `not_implemented` (see `docs/decisions/0002`). This story implements
-them and flips both flags — and flipping a flag without a handler behind it turns the
-smoke suite red, so the flag cannot be used to mark the work done. `/auth/session` IS the
+**The wire contract already exists.** SIX operations are designed in
+`contracts/openapi.yaml` under `x-story: "1.3"` / `x-implemented: false`, today answering
+501 `not_implemented` (see `docs/decisions/0002`): `GET /auth/session`,
+`POST /auth/context`, and — added 2026-09-04 — the **password fallback** that this story's
+credential set-up link implies: `POST /auth/sign-in`, `POST /auth/credential/set-up`,
+`POST /auth/password/forgot`, `POST /auth/password/reset`. This story implements them and
+flips their flags — and flipping a flag without a handler behind it turns the smoke suite
+red, so the flag cannot be used to mark the work done.
+
+**The password fallback is not optional.** The console's Sign in surface is "SSO first,
+password fallback, property picker", and FR-1 has a Jazzware operator create the first
+administrator with **no identity connection**, so that administrator must sign in before
+SSO exists. Unlike a PIN, this credential carries the holder's full role — the capability
+limit in T2 belongs to the PIN specifically, not to "not-SSO". The token in an emailed
+link travels in a URL **fragment**, never a query string, so it reaches no access log and
+no `Referer` header. **Story 1.1 issues the FIRST administrator's invitation and this
+story redeems it**: agree the token's shape with 1.1 before starting either, because until
+both are built a provisioned Tenant has an administrator who cannot sign in.
+**`forgot`/`reset` are designed at the shape level only and must not be built until
+epics.md settles the recovery and MFA policy** — ADR 0002, open questions 4 and 5. `/auth/session` IS the
 single decision point T4 asks for; its `permissions` array is the server's answer that the
 interface renders from. Two decisions recorded there are binding: a context switch **mints
 a new token** rather than reinterpreting the old one (AD-3), and a `propertyId` in another

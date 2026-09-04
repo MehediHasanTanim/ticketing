@@ -127,6 +127,10 @@ describe('cell smoke test', () => {
     const MAY_BE_PUBLIC = new Set([
       '/health', '/openapi.json', '/docs',
       '/auth/sso/start', '/auth/sso/callback', '/auth/device/sign-in', '/auth/token/refresh',
+      // The password fallback: every one of these is how a caller GETS a
+      // credential, or proves control of a mailbox in order to set one.
+      '/auth/sign-in', '/auth/credential/set-up',
+      '/auth/password/forgot', '/auth/password/reset',
     ]);
     const actuallyPublic = new Set<string>();
     for (const [path, ops] of Object.entries(doc.paths as Record<string, Record<string, { security?: unknown[] }>>)) {
@@ -154,9 +158,11 @@ describe('cell smoke test', () => {
         if (op['x-implemented'] === false) unbuilt.push({ method, path, story: op['x-story'] });
       }
     }
-    // The nine auth operations, and nothing else - a Story 1.0 operation marked
-    // unbuilt would mean something shipped that the spec says does not exist.
-    expect(unbuilt).toHaveLength(9);
+    // The thirteen auth operations, and nothing else - a Story 1.0 operation
+    // marked unbuilt would mean something shipped that the spec says does not
+    // exist. This number goes DOWN as 1.3, 1.5, 4.1 and 4.8 land, and changing it
+    // is meant to be a deliberate edit rather than a silent one.
+    expect(unbuilt).toHaveLength(13);
     expect(unbuilt.every((o) => o.path.startsWith('/auth/'))).toBe(true);
 
     // And the converse, which is the assertion that actually bites: an operation

@@ -231,6 +231,100 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/credential/set-up": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Redeem an invitation and set a password.
+         * @description The other end of Story 1.3's "an invitation with an email address issues a credential set-up link", and of Story 1.1's first-administrator invitation. Returns a session, because the holder has just proved control of the mailbox the invitation was sent to and there is no earlier session to protect - for a first administrator on a brand-new Tenant, making them sign in again immediately buys nothing.
+         *
+         *     SEQUENCING: Story 1.1 issues the first invitation and Story 1.3 redeems it, so the two must agree the token's shape before either starts - the same arrangement 4.1 and 4.3 have over the offline queue. Between them a provisioned Tenant has an administrator who cannot yet sign in.
+         *
+         *     The token is single-use and short-lived. Every rejection - unknown, expired, already used - is one generic `validation_failed`, so the endpoint cannot be used to learn that an invitation existed.
+         */
+        post: operations["setUpCredential"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/sign-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign in with an email address and a password.
+         * @description The documented fallback for corporate and management users whose Tenant has not connected an identity provider. Where a Tenant HAS connected one, this is refused for identities that provider governs - otherwise connecting SSO would leave a second, weaker door open beside it, and FR-3's promise that a deprovisioned identity loses access would be worth nothing.
+         *
+         *     One generic failure for every rejection - unknown address, wrong password, disabled account, an address governed by a connected provider - so the screen cannot be used to discover who has an account or which Tenants use SSO. Rate-limited per address and per source. Never logs the password, and never accepts it in a query string.
+         *
+         *     The response's `session.switchableProperties` is what the property picker on this surface renders; a caller with one Property gets one entry and the picker does not appear.
+         */
+        post: operations["signIn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/password/forgot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask for a password reset link.
+         * @description OPEN QUESTION, DESIGNED NO FURTHER THAN THE SHAPE. No FR covers credential recovery - it is a gap raised against the PRD, not a decision taken here - and Story 1.3's acceptance criteria do not currently require it. What is undecided is the policy: whether self-service reset is permitted at all for an administrator, or whether recovery goes through a Jazzware support request. It matters because an administrator locked out of a Tenant with no identity connection has no other way in, and because a self-service reset on an account without a second factor is a password-reset takeover. **Settle it in epics.md before building this.**
+         *
+         *     The shape itself is not in doubt: **always 202**, whether or not the address exists, whether or not it is governed by SSO. A response that differs is an account-enumeration oracle, and this is the one endpoint on the product that anyone can call.
+         */
+        post: operations["requestPasswordReset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/password/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set a new password from a reset token.
+         * @description Governed by the same open question as `/auth/password/forgot`.
+         *
+         *     Returns **204 and no session**, unlike credential set-up, and REVOKES EVERY OTHER SESSION for that Staff Member. The asymmetry is deliberate: a set-up is a first arrival with nothing to protect, while a reset may be the response to a credential already in someone else's hands, so it has to end the sessions that credential could have opened - including on any Shared Device. The holder signs in again through `/auth/sign-in`, which is also the only way they learn the new password works.
+         *
+         *     Token single-use and short-lived, delivered in a URL fragment and submitted in this body. One generic `validation_failed` for unknown, expired and already-used alike.
+         */
+        post: operations["resetPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/token/refresh": {
         parameters: {
             query?: never;
@@ -491,6 +585,25 @@ export interface components {
             lastSeenAt: string;
             /** @description True for the caller's own session. */
             current: boolean;
+        };
+        SignInRequest: {
+            /** Format: email */
+            email: string;
+            password: string;
+        };
+        CredentialSetUpRequest: {
+            /** @description Single-use, short-lived, delivered in the URL FRAGMENT of the invitation link and submitted here in the body - never in a query string, where it would land in access logs and Referer headers. */
+            token: string;
+            password: string;
+        };
+        PasswordForgotRequest: {
+            /** Format: email */
+            email: string;
+        };
+        PasswordResetRequest: {
+            /** @description As in CredentialSetUpRequest - fragment-delivered */
+            token: string;
+            password: string;
         };
     };
     responses: {
@@ -815,6 +928,111 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
+            501: components["responses"]["NotImplemented"];
+        };
+    };
+    setUpCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CredentialSetUpRequest"];
+            };
+        };
+        responses: {
+            /** @description the credential is set, and this is the session */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionToken"];
+                };
+            };
+            400: components["responses"]["Error"];
+            429: components["responses"]["TooManyAttempts"];
+            501: components["responses"]["NotImplemented"];
+        };
+    };
+    signIn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SignInRequest"];
+            };
+        };
+        responses: {
+            /** @description a session */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionToken"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            429: components["responses"]["TooManyAttempts"];
+            501: components["responses"]["NotImplemented"];
+        };
+    };
+    requestPasswordReset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordForgotRequest"];
+            };
+        };
+        responses: {
+            /** @description accepted - and says nothing about whether the address exists */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            429: components["responses"]["TooManyAttempts"];
+            501: components["responses"]["NotImplemented"];
+        };
+    };
+    resetPassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordResetRequest"];
+            };
+        };
+        responses: {
+            /** @description password set; every other session for this Staff Member is revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            429: components["responses"]["TooManyAttempts"];
             501: components["responses"]["NotImplemented"];
         };
     };

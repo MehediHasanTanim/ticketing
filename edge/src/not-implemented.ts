@@ -6,7 +6,8 @@ import { OPENAPI_DOCUMENT } from '../../contracts/generated/ts/openapi';
  *
  * The auth surface is designed in `contracts/openapi.yaml` ahead of the four stories
  * that build it (1.3, 1.5, 4.1, 4.8 - see docs/decisions/0002). That leaves the docs
- * page advertising nine operations that do not exist yet, and without this the reader
+ * page advertising thirteen operations that do not exist yet, and without this the
+ * reader
  * who presses "Try it out" on `POST /auth/device/sign-in` gets **401
  * unauthenticated** - which reads as "your credential was rejected" when the truth is
  * "nobody has built this yet". Same defect class as a disabled docs route answering
@@ -61,9 +62,10 @@ const STUBS = unimplementedOperations();
 /**
  * The owning story if this request names a documented-but-unbuilt operation.
  *
- * Consulted BEFORE tenancy resolution, deliberately: four of the nine operations are
- * how a caller obtains a credential in the first place, so demanding one in order to
- * be told the operation does not exist would be circular. It leaks nothing either
+ * Consulted BEFORE tenancy resolution, deliberately: eight of the thirteen operations
+ * are how a caller obtains a credential in the first place - or prove control of a
+ * mailbox in order to set one - so demanding one in order to be told the operation
+ * does not exist would be circular. It leaks nothing either
  * way - the API's shape is already public at /v1/docs, and `x-implemented: false`
  * says out loud that there is no data behind the path.
  */

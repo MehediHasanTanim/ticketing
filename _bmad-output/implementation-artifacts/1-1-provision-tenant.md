@@ -52,6 +52,25 @@ So that a new customer can be onboarded without Jazzware holding standing access
 
 **Prerequisites:** Story 1.0 (repository, cell, gates). The fixture auth stub from 1.0 is replaced here only for the operator scope; real customer identity arrives in 1.3 and 1.5.
 
+**Two contract facts, added 2026-09-04.**
+
+*The invitation this story issues has a redemption endpoint owned elsewhere.*
+`POST /auth/credential/set-up` is designed in `contracts/openapi.yaml` under
+`x-story: "1.3"`. Agree the invitation token's shape with 1.3 before starting either — the
+same arrangement 4.1 and 4.3 have over the offline queue — because until 1.3 lands, a
+Tenant provisioned here has a first administrator who cannot sign in. The token travels in
+a URL **fragment**, never a query string, so it reaches no access log and no `Referer`
+header.
+
+*AC-1's first clause is a precondition nothing builds.* "**Given** I am authenticated as a
+Jazzware operator on the internal provisioning surface" — no story in `epics.md` builds
+that authentication, and it deliberately does **not** belong on this cell's API: FR-1 puts
+Tenant creation on a surface the product does not link to, and AD-4 puts the control plane
+outside the cells `contracts/openapi.yaml` describes. It needs its own control-plane
+contract and its own story. **Raise it in epics.md rather than improvising it here** — and
+in particular do not add an operator credential to the cell, which would defeat FR-1's
+"provisioning grants Jazzware no standing access to tenant data".
+
 **Scope guards.** This story creates a Tenant and one administrator. It does **not** create Properties (1.2), assign roles beyond the first administrator (1.3), define custom roles (1.4), connect an identity provider (1.5), or manage Tenant defaults (1.6). Do not build a Tenant settings screen here.
 
 **The actor split is the point of this story.** FR-1 was amended precisely because the original wording conflated the vendor and the customer: "an administrator can create a Tenant and Properties under it" would have put commercial provisioning inside the hotel application. Two consequences the dev agent must not soften: the internal surface is **not linked** from the product, and the refusal for hotel-side roles is server-side, not a hidden menu item (AD-11).

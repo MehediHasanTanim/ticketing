@@ -19,6 +19,10 @@ Authentication, though, is not one story's surface. It is spread across four:
 | --- | --- | --- |
 | `GET /auth/session` | **1.3** | The single server-side permission decision point the interface queries (AD-11, 1.3 T4) |
 | `POST /auth/context` | **1.3** | Switch Property without signing out, permissions re-resolved (1.3 AC-3) |
+| `POST /auth/sign-in` | **1.3** | The password fallback: email plus password (1.3 AC-1's credential, FR-1) |
+| `POST /auth/credential/set-up` | **1.3** | Redeems the invitation 1.1 and 1.3 issue (1.3 AC-1) |
+| `POST /auth/password/forgot` | **1.3** | Recovery. **No FR covers it** - see the open questions |
+| `POST /auth/password/reset` | **1.3** | Recovery. **No FR covers it** - see the open questions |
 | `GET /auth/sso/start` | **1.5** | Per-Tenant SAML 2.0 / OIDC connection (FR-3) |
 | `POST /auth/sso/callback` | **1.5** | Assertion or code to session, JIT off by default (FR-83) |
 | `POST /auth/token/refresh` | **1.5** | Where upstream deprovisioning bites (1.5 AC-2) |
@@ -27,7 +31,7 @@ Authentication, though, is not one story's surface. It is spread across four:
 | `GET /auth/sessions` | **4.8** | Device and session hygiene (FR-64) |
 | `DELETE /auth/sessions/{sessionId}` | **4.8** | Remote sign-out, honoured at next contact (4.8 AC-3) |
 
-Those nine operations share one `Session` shape, one token shape and one set of rules
+Those thirteen operations share one `Session` shape, one token shape and one set of rules
 about what a credential may do. Discovering that in Story 4.8 would mean changing what
 Story 1.3 had already shipped — and a wire type that changes after clients exist is the
 expensive kind of change, because it lands in Dart and TypeScript at once.
@@ -48,7 +52,7 @@ markers are load-bearing rather than decorative:
 1. **`edge/src/not-implemented.ts` derives its behaviour from the document.** Every
    operation marked `x-implemented: false` answers **501 `not_implemented`** with its
    owning story in `details.story`. Nothing is listed by hand.
-2. **It is consulted before tenancy resolution.** Four of the nine operations are how a
+2. **It is consulted before tenancy resolution.** Eight of the thirteen operations are how a
    caller *obtains* a credential, so demanding one in order to be told the operation does
    not exist would be circular. Without this, a reader pressing "Try it out" on
    `POST /auth/device/sign-in` got **401 unauthenticated** — which reads as "your
@@ -63,11 +67,71 @@ markers are load-bearing rather than decorative:
    will ever remove; the suite fails on a missing `x-story`.
 5. **Opting out of auth is a closed allowlist**, asserted in both directions. Adding
    `security: []` to an operation without adding it to the allowlist fails, and so does
-   listing a path there that no longer opts out. The seven permitted names are health and
-   docs (no tenant data) and the four auth entry points (where a credential is obtained).
+   listing a path there that no longer opts out. The eleven permitted names are health and
+   docs (no tenant data) and the eight auth entry points - where a credential is obtained,
+   or where control of a mailbox is proved in order to set one.
 
 Negative controls 14–17 in `scripts/negative-controls.sh` break each of these
 deliberately and assert it goes red. A gate that has never failed is not known to work.
+
+## The password fallback, added 2026-09-04
+
+The first version of this contract covered SSO and PIN/badge and **missed the
+administrator password fallback**. Two approved documents require it:
+
+- the console UX spine describes its Sign in surface as "SSO first, **password
+  fallback**, property picker";
+- FR-1 makes it structural rather than a preference. A Jazzware operator creates a
+  Tenant and its first administrator and creates "no Properties and **no identity
+  connection** - those are the customer's to configure", so the first tenant
+  administrator has to sign in *before* an identity provider exists. SSO can never be
+  the only way in.
+
+So there are **three** credential types, not two, and Story 1.3 owns this one because it
+already provisions the credential ("an invitation with an email address issues a
+credential set-up link"). Unlike a PIN, this credential carries the holder's full role -
+the capability limit belongs to the PIN specifically, not to "not-SSO".
+
+**The token in an emailed link never travels in a query string.** The standing
+constraint is "never place a token, client secret or assertion in a URL or query string,
+and never log one", and a set-up or reset link is exactly that shape. Resolved with a
+URL **fragment** (`.../set-up#token=...`): a fragment is never sent to the server, so it
+appears in no access log, no proxy log and no `Referer` header. The console reads it in
+the browser and POSTs it in the body.
+
+**Two asymmetries worth keeping.** Credential set-up returns a session, because the
+holder has just proved control of the invited mailbox and there is no earlier session to
+protect. A password reset returns **204 and no session**, and revokes every other session
+for that Staff Member, because a reset may be the response to a credential already in
+someone else's hands. And `/auth/password/forgot` **always returns 202** whether or not
+the address exists - it is the one endpoint anyone on the internet can call, and a
+response that varies is an account-enumeration oracle.
+
+**Sequencing, flagged for whoever schedules the work:** Story 1.1 issues the first
+administrator's invitation and Story 1.3 redeems it, so between them a provisioned Tenant
+has an administrator who cannot yet sign in. The two stories must agree the token's shape
+before either starts - the same arrangement 4.1 and 4.3 have over the offline queue.
+
+## The Jazzware operator is deliberately absent
+
+There is **no** operator or super-admin sign-in on this API, and that is a decision
+rather than an omission:
+
+- FR-1 puts Tenant creation on "a Jazzware-internal function on a surface the product
+  does not link to", reachable by no hotel-side role. The UX spine makes it a separate
+  product (W35) with a different brand and an amber accent, "because an internal tool
+  that looks like the customer product is how someone acts in the wrong context".
+- AD-4 puts the control plane outside the regional cells, and this document describes a
+  cell (`servers: /v1`, "This cell, behind the edge"). Operator auth here would recreate
+  exactly the vendor/customer conflation FR-1's amendment exists to remove.
+- FR-1 and Story 1.1 AC-3: provisioning grants Jazzware **no standing access** to tenant
+  data, and support access is separately requested, time-boxed and recorded in the
+  Tenant's own audit trail. An operator who could sign in to a cell would defeat that.
+
+The gap is that Story 1.1 AC-1 opens with "**Given** I am authenticated as a Jazzware
+operator on the internal provisioning surface" - a precondition **no story builds**. It
+needs its own control-plane contract, and a story that does not exist. That is a change
+to raise in `epics.md`.
 
 ## Decisions recorded in the contract itself
 
@@ -134,6 +198,21 @@ guess the authority of a decision:
    an administrator can see live sessions, but no FR says so. `GET /auth/sessions` is
    modelled as a Property-scoped administrator read; if it is meant to be an audit surface
    instead, it belongs in Epic 10 and Story 4.8's scope changes.
+4. **Credential recovery policy.** No FR covers it, and Story 1.3's acceptance criteria do
+   not require it. `/auth/password/forgot` and `/auth/password/reset` are in the contract
+   at the shape level only, and **must not be built before epics.md settles the policy**:
+   whether self-service reset is permitted for an administrator at all, or whether recovery
+   runs through a time-boxed Jazzware support request. Both directions have a real cost -
+   an administrator locked out of a Tenant with no identity connection has no other way in,
+   while self-service reset on an account with no second factor is a password-reset
+   takeover.
+5. **Whether the password fallback requires a second factor.** NFR-7 says "no shared
+   administrative accounts" and is silent on MFA. A password fallback for a tenant
+   administrator without one is a decision that should be taken deliberately rather than
+   by omission, and it is the same decision as question 4 seen from the other side.
+6. **The region at sign-in.** The UX spine states the region at sign-in "because it is a
+   residency fact, not a detail" (DG-4), and `Session` carries no region field. Small, but
+   it belongs to whoever builds 1.3.
 
 ## Alternatives considered
 
@@ -144,4 +223,4 @@ guess the authority of a decision:
   becomes a second description of the API — exactly what generating a spec from decorated
   controllers would have done, which the contracts-first direction exists to prevent.
 - **Serve nothing for the unbuilt operations.** Rejected: the docs page would advertise
-  nine endpoints that answer 401, teaching every reader something false about the API.
+  thirteen endpoints that answer 401, teaching every reader something false about the API.

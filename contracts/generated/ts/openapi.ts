@@ -451,6 +451,171 @@ export const OPENAPI_DOCUMENT = {
         }
       }
     },
+    "/auth/credential/set-up": {
+      "post": {
+        "operationId": "setUpCredential",
+        "tags": [
+          "auth"
+        ],
+        "x-story": "1.3",
+        "x-implemented": false,
+        "security": [],
+        "summary": "Redeem an invitation and set a password.",
+        "description": "The other end of Story 1.3's \"an invitation with an email address issues a credential set-up link\", and of Story 1.1's first-administrator invitation. Returns a session, because the holder has just proved control of the mailbox the invitation was sent to and there is no earlier session to protect - for a first administrator on a brand-new Tenant, making them sign in again immediately buys nothing.\n\nSEQUENCING: Story 1.1 issues the first invitation and Story 1.3 redeems it, so the two must agree the token's shape before either starts - the same arrangement 4.1 and 4.3 have over the offline queue. Between them a provisioned Tenant has an administrator who cannot yet sign in.\n\nThe token is single-use and short-lived. Every rejection - unknown, expired, already used - is one generic `validation_failed`, so the endpoint cannot be used to learn that an invitation existed.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialSetUpRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "the credential is set, and this is the session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionToken"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyAttempts"
+          },
+          "501": {
+            "$ref": "#/components/responses/NotImplemented"
+          }
+        }
+      }
+    },
+    "/auth/sign-in": {
+      "post": {
+        "operationId": "signIn",
+        "tags": [
+          "auth"
+        ],
+        "x-story": "1.3",
+        "x-implemented": false,
+        "security": [],
+        "summary": "Sign in with an email address and a password.",
+        "description": "The documented fallback for corporate and management users whose Tenant has not connected an identity provider. Where a Tenant HAS connected one, this is refused for identities that provider governs - otherwise connecting SSO would leave a second, weaker door open beside it, and FR-3's promise that a deprovisioned identity loses access would be worth nothing.\n\nOne generic failure for every rejection - unknown address, wrong password, disabled account, an address governed by a connected provider - so the screen cannot be used to discover who has an account or which Tenants use SSO. Rate-limited per address and per source. Never logs the password, and never accepts it in a query string.\n\nThe response's `session.switchableProperties` is what the property picker on this surface renders; a caller with one Property gets one entry and the picker does not appear.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignInRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "a session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionToken"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyAttempts"
+          },
+          "501": {
+            "$ref": "#/components/responses/NotImplemented"
+          }
+        }
+      }
+    },
+    "/auth/password/forgot": {
+      "post": {
+        "operationId": "requestPasswordReset",
+        "tags": [
+          "auth"
+        ],
+        "x-story": "1.3",
+        "x-implemented": false,
+        "security": [],
+        "summary": "Ask for a password reset link.",
+        "description": "OPEN QUESTION, DESIGNED NO FURTHER THAN THE SHAPE. No FR covers credential recovery - it is a gap raised against the PRD, not a decision taken here - and Story 1.3's acceptance criteria do not currently require it. What is undecided is the policy: whether self-service reset is permitted at all for an administrator, or whether recovery goes through a Jazzware support request. It matters because an administrator locked out of a Tenant with no identity connection has no other way in, and because a self-service reset on an account without a second factor is a password-reset takeover. **Settle it in epics.md before building this.**\n\nThe shape itself is not in doubt: **always 202**, whether or not the address exists, whether or not it is governed by SSO. A response that differs is an account-enumeration oracle, and this is the one endpoint on the product that anyone can call.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordForgotRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "accepted - and says nothing about whether the address exists"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyAttempts"
+          },
+          "501": {
+            "$ref": "#/components/responses/NotImplemented"
+          }
+        }
+      }
+    },
+    "/auth/password/reset": {
+      "post": {
+        "operationId": "resetPassword",
+        "tags": [
+          "auth"
+        ],
+        "x-story": "1.3",
+        "x-implemented": false,
+        "security": [],
+        "summary": "Set a new password from a reset token.",
+        "description": "Governed by the same open question as `/auth/password/forgot`.\n\nReturns **204 and no session**, unlike credential set-up, and REVOKES EVERY OTHER SESSION for that Staff Member. The asymmetry is deliberate: a set-up is a first arrival with nothing to protect, while a reset may be the response to a credential already in someone else's hands, so it has to end the sessions that credential could have opened - including on any Shared Device. The holder signs in again through `/auth/sign-in`, which is also the only way they learn the new password works.\n\nToken single-use and short-lived, delivered in a URL fragment and submitted in this body. One generic `validation_failed` for unknown, expired and already-used alike.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordResetRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "password set; every other session for this Staff Member is revoked"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyAttempts"
+          },
+          "501": {
+            "$ref": "#/components/responses/NotImplemented"
+          }
+        }
+      }
+    },
     "/auth/token/refresh": {
       "post": {
         "operationId": "refreshToken",
@@ -646,7 +811,7 @@ export const OPENAPI_DOCUMENT = {
       "bearerAuth": {
         "type": "http",
         "scheme": "bearer",
-        "description": "STORY 1.0 ONLY - a fixture auth stub, gated behind `FIXTURE_AUTH=1` so it cannot ship enabled. The token is an HMAC-signed `{tenantId, propertyId, staffMemberId}`, and what it exists to exercise is the TENANCY RESOLUTION BOUNDARY, not the credential. The real thing is already designed - see the `auth` tag, whose operations are marked `x-implemented: false` - and Story 1.3 provisions PIN credentials, Story 4.1 signs in with them, Story 1.5 connects the Tenant identity provider and REMOVES this stub's production path."
+        "description": "STORY 1.0 ONLY - a fixture auth stub, gated behind `FIXTURE_AUTH=1` so it cannot ship enabled. The token is an HMAC-signed `{tenantId, propertyId, staffMemberId}`, and what it exists to exercise is the TENANCY RESOLUTION BOUNDARY, not the credential. The real thing is already designed - see the `auth` tag, whose operations are marked `x-implemented: false` - and Story 1.3 brings both the password fallback and PIN provisioning, Story 4.1 signs in with a PIN or badge, Story 1.5 connects the Tenant identity provider. Story 1.3 is where this stub's production path is first replaced; 1.5 removes the last of it."
       }
     },
     "responses": {
@@ -1189,6 +1354,80 @@ export const OPENAPI_DOCUMENT = {
           "current": {
             "type": "boolean",
             "description": "True for the caller's own session."
+          }
+        }
+      },
+      "SignInRequest": {
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 320
+          },
+          "password": {
+            "type": "string",
+            "writeOnly": true,
+            "minLength": 12,
+            "maxLength": 256
+          }
+        }
+      },
+      "CredentialSetUpRequest": {
+        "type": "object",
+        "required": [
+          "token",
+          "password"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "writeOnly": true,
+            "description": "Single-use, short-lived, delivered in the URL FRAGMENT of the invitation link and submitted here in the body - never in a query string, where it would land in access logs and Referer headers."
+          },
+          "password": {
+            "type": "string",
+            "writeOnly": true,
+            "minLength": 12,
+            "maxLength": 256
+          }
+        }
+      },
+      "PasswordForgotRequest": {
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 320
+          }
+        }
+      },
+      "PasswordResetRequest": {
+        "type": "object",
+        "required": [
+          "token",
+          "password"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "writeOnly": true,
+            "description": "As in CredentialSetUpRequest - fragment-delivered",
+            "single-use.": null
+          },
+          "password": {
+            "type": "string",
+            "writeOnly": true,
+            "minLength": 12,
+            "maxLength": 256
           }
         }
       }
