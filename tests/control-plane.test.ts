@@ -28,6 +28,11 @@ const CONTACT_SHAPED = ['email', 'phone', 'address'];
 const CONTACT_ALLOWED = new Map([
   ['operator_accounts.email', 'FR-86: a Jazzware operator\'s own work address. Staff identity (DG-5), never a guest\'s.'],
   ['invitations.email', 'FR-1: the first tenant administrator\'s work address, so the invitation can reach them.'],
+  // Story 1.3. A Staff Member's own WORK address, and the field that decides which
+  // account they get: present means a credential set-up link, absent means a PIN-only
+  // account for a Shared Device. Staff identity under DG-5, never a guest's - and DG-5
+  // is also why there is no payroll identifier and no date of birth beside it.
+  ['staff_members.email', 'FR-2/AC-1: a Staff Member\'s own work address, and the field that chooses their credential path.'],
 ]);
 
 describe('control plane holds no guest data (AD-4)', () => {

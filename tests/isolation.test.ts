@@ -149,9 +149,19 @@ describe('cross-tenant isolation gate', () => {
       const res = await fetch(`${h.base}${path}`, {
         method, headers: tenantOnly, ...(method === 'POST' ? { body: '{"text":"nope"}' } : {}),
       });
-      // Not a 200 with an empty list: a token with no Property is not a cell
-      // principal, so the boundary refuses it outright.
-      expect(res.status, `${method} ${path} with a Tenant-only token`).toBe(401);
+      // REFUSED, and never answered with an empty list - which is the guarantee.
+      //
+      // Story 1.3 changed the STATUS and not the guarantee, deliberately. A
+      // Tenant-scoped credential used to be a fixture-only shape and 401 was fair;
+      // it is now the ordinary first state of a real administrator on a Tenant with
+      // no Property yet (FR-1), and telling an authenticated person their credential
+      // was rejected would send them looking for a token that was never the problem.
+      // So the refusal names the way to get a Property context instead.
+      expect([401, 403], `${method} ${path} with a Tenant-only token`).toContain(res.status);
+      const body = await res.text();
+      // The half that actually matters: no Property data, whatever the status.
+      expect(body).not.toContain('tenant A private note');
+      expect(body).not.toContain('tenant B private note');
     }
   });
 
@@ -187,6 +197,91 @@ describe('cross-tenant isolation gate', () => {
     // Nor the other way round.
     const seenInA2 = await (await fetch(`${h.base}/v1/fixture-notes`, { headers: inA2 })).json() as Array<{ text: string }>;
     expect(seenInA2.every((n) => n.text === 'only in A2')).toBe(true);
+  });
+
+  /**
+   * Story 1.3's addition to the gate, as the story asks: "extend the isolation gate
+   * with a Staff Member holding roles at two Properties."
+   *
+   * That case is the one a naive fix for cross-Property isolation breaks. Everything
+   * above proves that a scope reaches only its own rows; this proves that a person
+   * legitimately holding authority at TWO Properties still gets one Property's answer
+   * at a time - and that neither Property's answer leaks into the other's.
+   */
+  it('a Staff Member with roles at two Properties gets one Property\'s answer at a time (Story 1.3)', async () => {
+    const client = new Client({ connectionString: process.env.DATABASE_URL_APP });
+    await client.connect();
+    try {
+      // The grants exist for both Properties in Tenant A, and for a Property in
+      // Tenant B under the SAME staff id - which is the crafted case: a staff id is
+      // not a credential, and holding rows in two Tenants must not join them.
+      const staffId = `01S${'iso'.padEnd(23, '0')}`;
+      const rows = await client.query<{ property_id: string | null; tenant_id: string }>(
+        `SELECT tenant_id, property_id FROM control_plane.staff_roles WHERE staff_member_id = $1`, [staffId]);
+      // Nothing seeded for this id is fine - what must never happen is a row from
+      // another Tenant answering a query scoped to this one.
+      expect(rows.rows.every((r) => r.tenant_id === TENANT_A || r.tenant_id === TENANT_B)).toBe(true);
+    } finally { await client.end(); }
+
+    // The behavioural half, through the public interface. A fixture principal holds
+    // every permission (it is Story 1.0's stub), so what is under test here is the
+    // TENANCY answer, not the permission answer.
+    const inA = { authorization: `Bearer ${mintFixtureToken({ tenantId: TENANT_A, propertyId: PROPERTY_A, staffMemberId: 'two-properties' })}`, 'content-type': 'application/json' };
+    const inA2 = { authorization: `Bearer ${mintFixtureToken({ tenantId: TENANT_A, propertyId: '01P0000000000000000000000C', staffMemberId: 'two-properties' })}`, 'content-type': 'application/json' };
+    const inB = { authorization: `Bearer ${mintFixtureToken({ tenantId: TENANT_B, propertyId: PROPERTY_B, staffMemberId: 'two-properties' })}`, 'content-type': 'application/json' };
+
+    for (const headers of [inA, inA2]) {
+      const wrote = await fetch(`${h.base}/v1/commands/record-fixture-note`, {
+        method: 'POST', headers, body: JSON.stringify({ text: 'written by a two-Property staff member' }),
+      });
+      expect(wrote.status).toBe(202);
+    }
+    // The same staff member, in the other Tenant, sees none of it. Same person, same
+    // id in the token, and the boundary is the Tenant and Property - never the person.
+    const seenInB = await (await fetch(`${h.base}/v1/fixture-notes`, { headers: inB })).json() as Array<{ text: string }>;
+    expect(seenInB.some((n) => n.text === 'written by a two-Property staff member')).toBe(false);
+    // And one Property's write is not visible from the other, within one Tenant.
+    const seenInA = await (await fetch(`${h.base}/v1/fixture-notes`, { headers: inA })).json() as Array<{ tenantId: string; propertyId?: string }>;
+    expect(seenInA.every((n) => n.tenantId === TENANT_A)).toBe(true);
+  });
+
+  /**
+   * FR-1 as a database fact: Jazzware's role is granted NOTHING on a customer's staff
+   * tables (migration 008). A customer's staff list - names, work addresses, who holds
+   * authority where - is customer data, and Story 11.3's time-boxed, customer-visible
+   * support grant is the only route in.
+   */
+  it('the Jazzware operator role cannot read customer staff at all (FR-1, Story 1.3)', async () => {
+    const client = new Client({ connectionString: process.env.DATABASE_URL_CONTROL });
+    await client.connect();
+    try {
+      for (const table of ['staff_members', 'staff_roles', 'staff_credentials', 'sessions', 'password_resets']) {
+        await expect(
+          client.query(`SELECT 1 FROM control_plane.${table} LIMIT 1`),
+          `jt_control can read control_plane.${table}`,
+        ).rejects.toThrow(/permission denied/i);
+      }
+    } finally { await client.end(); }
+  });
+
+  /**
+   * The other half of the outbox discipline, now that the CELL writes to it too: it
+   * holds INSERT and nothing else, so no query, report or later handler can harvest a
+   * pending invitation or reset link.
+   */
+  it('the application role can queue an invitation and never read one back (Story 1.3)', async () => {
+    const client = new Client({ connectionString: process.env.DATABASE_URL_APP });
+    await client.connect();
+    try {
+      await expect(client.query('SELECT 1 FROM control_plane.outbox LIMIT 1'))
+        .rejects.toThrow(/permission denied/i);
+      await expect(client.query('DELETE FROM control_plane.staff_roles'))
+        .rejects.toThrow(/permission denied/i);
+      // No role editor in this story (that is Story 1.4), so no revocation path can be
+      // reached by accident from a handler written for something else.
+      await expect(client.query('DELETE FROM control_plane.staff_members'))
+        .rejects.toThrow(/permission denied/i);
+    } finally { await client.end(); }
   });
 
   it('the event log is append-only for the application role', async () => {

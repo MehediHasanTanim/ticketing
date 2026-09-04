@@ -7,7 +7,25 @@ import { handleRecordFixtureNote } from '../../app/src/record-fixture-note';
 import { systemClock } from '../../app/src/clock';
 import { foldSla } from '../../core/src/job';
 import { ValidationError } from '../../core/src/fixture/note';
-import { resolvePrincipal, resolveTenantPrincipal, type Principal } from './auth';
+import { type Principal } from './auth';
+import { asTenantId, asPropertyId, asStaffMemberId, type TenantScope } from '../../core/src/tenancy';
+import {
+  resolveCellPrincipal, toClaims, decide, sessionFor, sourceOf, type CellPrincipal,
+} from './authorise';
+import { mintSessionToken } from './session-token';
+import { consume, LIMITS } from './rate-limit';
+import { withoutScope } from '../../adapters/src/postgres/pool';
+import {
+  handleSignIn, handleCredentialSetUp, handlePasswordForgot, handlePasswordReset,
+  handleSwitchContext, resolveSession, Unauthenticated, Forbidden as StaffForbidden,
+  NotFound as StaffNotFound, type SessionFacts,
+} from '../../app/src/staff/sessions';
+import {
+  handleInviteStaffMember, listStaffMembers, listRoles,
+  ConflictError as StaffConflict,
+} from '../../app/src/staff/invite-staff-member';
+import type { Permission } from '../../core/src/staff/roles';
+import type { SessionView } from '../../app/src/staff/sessions';
 import { docsEnabled, serveDocsAsset, serveDocsPage, serveOpenApiDocument } from './docs';
 import { unimplementedStory } from './not-implemented';
 import { handleControlPlane, isControlPlanePath } from './control-plane/router';
@@ -49,6 +67,77 @@ const readBody = async (req: IncomingMessage): Promise<unknown> => {
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
   catch { throw new ValidationError('body must be JSON'); }
 };
+
+/**
+ * A Tenant scope from any cell principal, Tenant- or Property-scoped. Deliberately
+ * drops the Property: `withTenantScope` refuses one (AD-3), and the control-plane
+ * reads these routes make carry their own explicit predicates.
+ */
+const tenantScopeOf = (p: CellPrincipal): TenantScope => ({
+  tenantId: asTenantId(p.tenantId),
+  ...(p.staffMemberId ? { staffMemberId: asStaffMemberId(p.staffMemberId) } : {}),
+});
+
+/**
+ * ASK THE ONE QUESTION (AD-11). Every gated route in this file goes through here, so
+ * there is exactly one place a permission question is answered and exactly one place
+ * each denial becomes a status. Returns undefined once it has already answered.
+ */
+async function gate(
+  res: ServerResponse, principal: CellPrincipal, permission: Permission, now: Date,
+): Promise<SessionView | undefined> {
+  const verdict = await withTenantScope(tenantScopeOf(principal), (c) => decide(c, principal, permission, now));
+  if ('deny' in verdict) {
+    if (verdict.deny === 'unauthenticated') { fail(res, 'unauthenticated', { reason: verdict.reason }); return undefined; }
+    fail(res, 'forbidden', { reason: verdict.reason });
+    return undefined;
+  }
+  return verdict.session;
+}
+
+/** A minted token plus the session it speaks for, which is the `SessionToken` shape. */
+async function sessionTokenFor(facts: SessionFacts, now: Date): Promise<unknown> {
+  const minted = mintSessionToken({ ...facts, now });
+  const session = await withTenantScope(
+    { tenantId: asTenantId(facts.tenantId), staffMemberId: asStaffMemberId(facts.staffMemberId) },
+    (c) => resolveSession(c, {
+      sessionId: facts.sessionId, tenantId: facts.tenantId,
+      ...(facts.propertyId ? { propertyId: facts.propertyId } : {}),
+      staffMemberId: facts.staffMemberId, credentialType: facts.credentialType,
+      languageTag: facts.languageTag,
+    }, now));
+  return {
+    accessToken: minted.accessToken, tokenType: 'Bearer',
+    expiresInSeconds: minted.expiresInSeconds, session,
+  };
+}
+
+/**
+ * The endpoints anyone on the internet can call. Per address AND per source, because
+ * per-address alone lets one source spray a dictionary across many addresses and
+ * per-source alone lets a botnet hammer one address. See rate-limit.ts for what this
+ * control does not do.
+ */
+const limited = (
+  res: ServerResponse, req: IncomingMessage, limit: { max: number; windowMs: number },
+  operation: string, subject: string | undefined, now: Date,
+): boolean => {
+  // TWO INDEPENDENT KEYS, and they have to be independent to be worth anything: a
+  // per-subject key that also includes the source is still per-subject, so one
+  // machine could spray a dictionary across many addresses and never hit a limit.
+  // The source key therefore carries the operation and the source alone.
+  const keys = [`${operation}|src|${sourceOf(req)}`];
+  if (subject) keys.push(`${operation}|subject|${subject}`);
+  for (const key of keys) {
+    const verdict = consume(key, limit, now);
+    if (!verdict.allowed) {
+      fail(res, 'too_many_attempts', { retryAfterSeconds: verdict.retryAfterSeconds });
+      return true;
+    }
+  }
+  return false;
+};
+
 
 const routes: Array<{ method: string; path: RegExp; handler: Handler }> = [
   { method: 'POST', path: /^\/v1\/commands\/record-fixture-note$/, handler: async (req, res, ctx) => {
@@ -115,6 +204,10 @@ async function propertyAcceptsWrites(principal: Principal): Promise<boolean> {
 export function createApp(): Server {
   return createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
+    // ONE clock reading per request. Two readings inside one request can disagree
+    // across a token's expiry boundary, and a session that is valid for the gate and
+    // expired for the handler is the kind of defect that reproduces once a day.
+    const now = new Date();
     try {
       // GET and HEAD are equivalent on the public routes. Monitoring and probes
       // routinely use HEAD, and a HEAD that 401s where GET succeeds is a bug
@@ -189,6 +282,123 @@ export function createApp(): Server {
       const story = unimplementedStory(req, url.pathname);
       if (story) return fail(res, 'not_implemented', { story });
 
+      // ---- authentication (Story 1.3) ----
+      // BEFORE tenancy resolution, because these four are how a caller OBTAINS a
+      // credential: demanding one in order to sign in would be circular. They were
+      // answered by the 501 stub until this story flipped their flags in
+      // contracts/openapi.yaml, and the smoke suite fails if a flag is flipped
+      // without a handler landing here.
+      if (url.pathname === '/v1/auth/sign-in' && req.method === 'POST') {
+        const b = (await readBody(req)) as Record<string, unknown>;
+        if (limited(res, req, LIMITS.signIn, 'sign-in', String(b.email ?? '').trim().toLowerCase(), now)) return;
+        const facts = await withoutScope((c) => handleSignIn(c, b, now));
+        // ONE response type whether or not a second factor is needed, so Story 12.2
+        // makes the other branch reachable without changing any caller's parsing.
+        return json(res, 200, { status: 'authenticated', token: await sessionTokenFor(facts, now) });
+      }
+
+      if (url.pathname === '/v1/auth/credential/set-up' && req.method === 'POST') {
+        const b = (await readBody(req)) as Record<string, unknown>;
+        // Keyed by SOURCE ONLY: keying by the token would let an attacker with many
+        // guesses spread them across keys, which is the opposite of a limit.
+        if (limited(res, req, LIMITS.credentialSetUp, 'credential-set-up', undefined, now)) return;
+        const facts = await withoutScope((c) => handleCredentialSetUp(c, b, now));
+        return json(res, 200, await sessionTokenFor(facts, now));
+      }
+
+      if (url.pathname === '/v1/auth/password/forgot' && req.method === 'POST') {
+        const b = (await readBody(req)) as Record<string, unknown>;
+        if (limited(res, req, LIMITS.passwordForgot, 'password-forgot', String(b.email ?? '').trim().toLowerCase(), now)) return;
+        // ALWAYS 202. Whether the address exists, whether it has a password, whether
+        // its Tenant is active - the answer is identical, because a response that
+        // differs is an account-enumeration oracle and this is the one endpoint
+        // anybody can call. The count is logged, never returned.
+        const queued = await withoutScope((c) => handlePasswordForgot(c, b, now));
+        if (queued === 0) console.log('[auth] password reset requested for an address with no account');
+        res.writeHead(202, { 'content-type': 'application/json; charset=utf-8' });
+        return res.end('{}');
+      }
+
+      if (url.pathname === '/v1/auth/password/reset' && req.method === 'POST') {
+        const b = (await readBody(req)) as Record<string, unknown>;
+        if (limited(res, req, LIMITS.passwordReset, 'password-reset', undefined, now)) return;
+        await withoutScope((c) => handlePasswordReset(c, b, now));
+        // 204 AND NO SESSION, unlike set-up: a reset may be the answer to a
+        // credential already in someone else's hands, so every other session for
+        // this Staff Member has just been revoked and they sign in again.
+        res.writeHead(204);
+        return res.end();
+      }
+
+      // ---- the session, and switching Property (Story 1.3 AC-3) ----
+      if (url.pathname === '/v1/auth/session' || url.pathname === '/v1/auth/context') {
+        const principal = resolveCellPrincipal(req.headers.authorization, now);
+        if (!principal) return fail(res, 'unauthenticated');
+        const scope = tenantScopeOf(principal);
+
+        if (readMethod && url.pathname === '/v1/auth/session') {
+          // THE decision point, served to the interface from the same code path that
+          // enforces it - so what the console renders and what the server refuses
+          // cannot disagree (AD-11). No permission is required to read your own
+          // session; being authenticated IS the requirement.
+          try {
+            return json(res, 200, await withTenantScope(scope, (c) => sessionFor(c, principal, now)));
+          } catch (err) {
+            if (err instanceof Unauthenticated) return fail(res, 'unauthenticated', { reason: err.message });
+            throw err;
+          }
+        }
+
+        if (req.method === 'POST' && url.pathname === '/v1/auth/context') {
+          const b = (await readBody(req)) as { propertyId?: string };
+          if (principal.kind === 'fixture') {
+            // The stub mints its own scope directly; there is no session row for a
+            // switch to be against. Refusing here keeps the fixture path from
+            // becoming a second way to obtain a real token.
+            return fail(res, 'forbidden', { reason: 'the Story 1.0 fixture credential has no session to switch' });
+          }
+          const facts = await withTenantScope(scope, (c) =>
+            handleSwitchContext(c, toClaims(principal), String(b.propertyId ?? ''), now));
+          return json(res, 200, await sessionTokenFor(facts, now));
+        }
+        return fail(res, 'not_found');
+      }
+
+      // ---- the role picker and staff invitation (Story 1.3 AC-1, AC-2, AC-5) ----
+      if (url.pathname === '/v1/roles' || url.pathname === '/v1/staff') {
+        const principal = resolveCellPrincipal(req.headers.authorization, now);
+        if (!principal) return fail(res, 'unauthenticated');
+        const scope = tenantScopeOf(principal);
+
+        if (readMethod && url.pathname === '/v1/roles') {
+          if (!(await gate(res, principal, 'role.read', now))) return;
+          return json(res, 200, await withTenantScope(scope, (c) => listRoles(c, principal.tenantId)));
+        }
+
+        if (req.method === 'POST' && url.pathname === '/v1/staff') {
+          // The route-level gate answers "may this caller invite anywhere at all".
+          // WHERE they may is decided per (Property, role) pair inside the handler,
+          // which is the refusal AC-4 asks to be tested with a crafted payload.
+          if (!(await gate(res, principal, 'staff.invite', now))) return;
+          const b = await readBody(req);
+          const out = await withTenantScope(scope, (c) => handleInviteStaffMember(c, {
+            tenantId: principal.tenantId, staffMemberId: principal.staffMemberId,
+            credentialType: principal.credentialType,
+          }, b, now));
+          return json(res, 201, out);
+        }
+
+        if (readMethod && url.pathname === '/v1/staff') {
+          if (!(await gate(res, principal, 'staff.read', now))) return;
+          const propertyId = url.searchParams.get('propertyId') ?? undefined;
+          return json(res, 200, await withTenantScope(scope, (c) => listStaffMembers(c, {
+            tenantId: principal.tenantId, staffMemberId: principal.staffMemberId,
+            credentialType: principal.credentialType,
+          }, { ...(propertyId ? { propertyId } : {}) }, now)));
+        }
+        return fail(res, 'not_found');
+      }
+
       // ---- Tenant-scoped routes (Story 1.2) ----
       // Creating the first Property is the one operation with no Property to be
       // scoped to, so it resolves a TENANT principal. That type is not assignable
@@ -196,10 +406,18 @@ export function createApp(): Server {
       // every cell table's RLS policy, which needs both settings, returns nothing
       // inside these transactions. The isolation gate asserts exactly that.
       if (url.pathname === '/v1/properties' || /^\/v1\/properties\/[^/]+(\/[a-z-]+)?$/.test(url.pathname)) {
-        const tenant = resolveTenantPrincipal(req.headers.authorization);
-        if (!tenant) return fail(res, 'unauthenticated');
+        // Story 1.3: these routes now take a REAL session as well as Story 1.0's
+        // stub, and every one of them is permission-gated. `property.create` and
+        // `property.deactivate` need TENANT-WIDE authority (core/src/staff/roles.ts):
+        // a property administrator responsible for the Harbour has no business
+        // creating - or retiring - a Property somewhere else in the estate, and AC-4
+        // asks for that refusal to be server-side rather than an absent menu item.
+        const principal = resolveCellPrincipal(req.headers.authorization, now);
+        if (!principal) return fail(res, 'unauthenticated');
+        const tenant = tenantScopeOf(principal);
 
         if (req.method === 'POST' && url.pathname === '/v1/properties') {
+          if (!(await gate(res, principal, 'property.create', now))) return;
           const b = (await readBody(req)) as Record<string, unknown>;
           // AC-2, for the caller who sends a region to a creation call it does not
           // belong on... it does belong here, at creation. The refusal that names
@@ -214,17 +432,20 @@ export function createApp(): Server {
         }
 
         if (readMethod && url.pathname === '/v1/properties') {
+          if (!(await gate(res, principal, 'property.read', now))) return;
           return json(res, 200, await withTenantScope(tenant, (c) => listProperties(c, tenant.tenantId)));
         }
 
         const setup = /^\/v1\/properties\/([^/]+)\/setup$/.exec(url.pathname);
         if (readMethod && setup) {
+          if (!(await gate(res, principal, 'property.setup.read', now))) return;
           return json(res, 200, await withTenantScope(tenant, (c) =>
             propertySetupState(c, tenant.tenantId, decodeURIComponent(setup[1] ?? ''))));
         }
 
         const deactivate = /^\/v1\/properties\/([^/]+)\/deactivate$/.exec(url.pathname);
         if (req.method === 'POST' && deactivate) {
+          if (!(await gate(res, principal, 'property.deactivate', now))) return;
           return json(res, 200, await withTenantScope(tenant, (c) => handleDeactivateProperty(
             c, tenant, decodeURIComponent(deactivate[1] ?? ''), new Date())));
         }
@@ -233,6 +454,9 @@ export function createApp(): Server {
         // one must say WHY rather than answer a bare 404. This is the "direct API
         // call, not only the absent form field" the story asks to be tested.
         const one = /^\/v1\/properties\/([^/]+)$/.exec(url.pathname);
+        // DELIBERATELY UNGATED. This operation exists only to refuse a region change
+        // with residency named (AC-2). Gating it would answer 403 for a different
+        // reason and lose the message the criterion asks for.
         if (one && (req.method === 'PATCH' || req.method === 'PUT')) {
           const b = (await readBody(req)) as { region?: string };
           await withTenantScope(tenant, (c) => assertPropertyRegionUnchanged(
@@ -243,6 +467,7 @@ export function createApp(): Server {
           return fail(res, 'not_found');
         }
         if (readMethod && one) {
+          if (!(await gate(res, principal, 'property.read', now))) return;
           const list = await withTenantScope(tenant, (c) => listProperties(c, tenant.tenantId));
           const found = list.find((x) => x.propertyId === decodeURIComponent(one[1] ?? ''));
           if (!found) return fail(res, 'not_found');
@@ -252,8 +477,23 @@ export function createApp(): Server {
       }
 
       // ---- tenancy resolution: the one boundary (AD-3) ----
-      const principal = resolvePrincipal(req.headers.authorization);
-      if (!principal) return fail(res, 'unauthenticated');
+      // Still demands BOTH a Tenant and a Property. Story 1.3 added a Tenant-scoped
+      // session for FR-1's first administrator; it did not soften this. Such a
+      // caller is authenticated and simply has no Property context yet, so the
+      // answer names the way to get one instead of a bare 401 that reads as a
+      // rejected credential.
+      const cell = resolveCellPrincipal(req.headers.authorization, now);
+      if (!cell) return fail(res, 'unauthenticated');
+      if (!cell.propertyId) {
+        return fail(res, 'forbidden', {
+          reason: 'this session is not scoped to a Property yet: choose one with POST /v1/auth/context',
+        });
+      }
+      const principal: Principal = {
+        tenantId: asTenantId(cell.tenantId),
+        propertyId: asPropertyId(cell.propertyId),
+        staffMemberId: asStaffMemberId(cell.staffMemberId),
+      };
 
       // AC-3: a deactivated Property STOPS ACCEPTING NEW WORK while its records
       // STAY READABLE. Enforced here rather than in each handler, because Jobs
@@ -271,6 +511,10 @@ export function createApp(): Server {
       await route.handler(req, res, { principal, url });
     } catch (err) {
       if (err instanceof RegionImmutable) return fail(res, 'forbidden', { reason: err.message });
+      if (err instanceof Unauthenticated) return fail(res, 'unauthenticated', { reason: err.message });
+      if (err instanceof StaffForbidden) return fail(res, 'forbidden', { reason: err.message });
+      if (err instanceof StaffNotFound) return fail(res, 'not_found');
+      if (err instanceof StaffConflict) return fail(res, 'conflict', { reason: err.message });
       if (err instanceof PropertyConflict) return fail(res, 'conflict', { reason: err.message });
       if (err instanceof PropertyNotFound) return fail(res, 'not_found');
       if (err instanceof ValidationError) return fail(res, 'validation_failed', { reason: err.message });

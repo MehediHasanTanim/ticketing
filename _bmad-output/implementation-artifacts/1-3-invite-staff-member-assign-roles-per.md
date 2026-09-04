@@ -1,6 +1,6 @@
 # Story 1.3: Invite a Staff Member and assign roles per Property
 
-Status: ready-for-dev
+Status: review
 
 <!-- Created by bmad-create-story 2026-09-02. Story statement and acceptance criteria are transcribed verbatim from planning-artifacts/epics.md (status: final) - do not reword them here; a story needing a different criterion is a change to raise in epics.md. Epic 1: Property go-live foundation. -->
 
@@ -129,10 +129,194 @@ New: `core/staff/`, `app/staff/`, and the authorisation decision point in `edge/
 
 ### Agent Model Used
 
-_(to be filled by the dev agent)_
+claude-opus-5 (Cowork, remote session linked to tanim-m4-pro-local). Contracts-first, in
+the order the standing constraints require: `contracts/openapi.yaml` before any handler,
+bindings regenerated, then core -> adapters -> app -> edge, then the gates.
 
 ### Debug Log References
 
+`.dev-refresh.log` (gitignored) is the loop: `npm run refresh` rebuilds both images,
+applies migrations, verifies the cell, and - new in this story - runs the suite and the
+gates and prints its own `TEST RESULT` line. That step is reported and never fatal, so a
+suite failing for an environment reason cannot make "did the containers rebuild"
+unanswerable.
+
 ### Completion Notes List
 
+**All five acceptance criteria are built and asserted at the boundary, from provisioning
+onward.** `tests/staff.test.ts` starts where a real Tenant starts - a Jazzware operator
+provisions it (Story 1.1), which issues the first administrator's invitation and creates no
+Properties and no Staff Members - and redeems that invitation as its first act. Seeding a
+Staff Member row directly would have tested the handlers without testing the seam, and the
+seam was the half actually at risk: **until both halves existed, a provisioned Tenant had
+an administrator who could not sign in.**
+
+**The 1.1 / 1.3 token agreement, which the story required before either started.**
+Provisioning records an invitation with an email address and nothing else - a Jazzware
+operator has no business typing a customer administrator's name or choosing their language
+- so `CredentialSetUpRequest` now requires `name` and `languageTag`, and redemption is
+where the person describes themselves. Required for *every* redemption rather than only the
+first-administrator case: one code path, no leak, and the person's own spelling wins over
+whatever an administrator typed. Redemption creates the Staff Member when the invitation has
+none, with a **Tenant-wide `property_administrator`** grant.
+
+**Six operations flipped from designed-ahead to built** (`/auth/session`, `/auth/context`,
+`/auth/sign-in`, `/auth/credential/set-up`, `/auth/password/forgot`, `/auth/password/reset`),
+so the unbuilt count went 20 -> 14. Three additions were needed and are in the contract
+first: `POST /staff`, `GET /staff`, `GET /roles`.
+
+**The single decision point (T4, AD-11, ADR 0003).** `resolvePermissions` in
+`core/src/staff/roles.ts` is pure and has no I/O; `edge/src/authorise.ts` is its only
+caller; `GET /v1/auth/session` serves its output to the interface; every gated route reaches
+it through one `gate()` helper. What the console renders and what the server enforces are
+the same array. Grants are read per request for the token's Property, so AC-3's
+re-resolution is structural rather than something a handler remembers to do.
+
+**FR-4 is on the credential, not the role.** Each permission declares a class
+(`operational` / `configuration` / `reporting`) and each credential type declares which
+classes it carries; `pin` and `badge` carry `operational` only. A permission with no class
+is a compile error. Tested at the boundary as well as in units, by constructing the session
+Story 4.1 will produce - a real session row with `credential_type = 'pin'` held by a full
+administrator - and asserting the server refuses `POST /v1/staff` and `GET /v1/staff`.
+
+**Two decisions taken that were not in the story, and why.**
+
+1. **A session may be TENANT-scoped.** `Session.propertyId` and `Session.region` are now
+   optional. FR-1 creates an administrator before any Property exists, so their first
+   session has no Property to be scoped to - the same single AD-3 exception
+   `POST /properties` already was, and `core/src/tenancy.ts` has carried the type
+   distinction since Story 1.2. A Property-scoped route answers **403 naming the property
+   picker**, not 401: telling an authenticated person their credential was rejected sends
+   them looking for a token that was never the problem. This changed one isolation-gate
+   expectation from `401` to `401 or 403`, and the gate was **strengthened** in the same
+   edit to assert what actually matters - that no Property data comes back either way.
+2. **`property.create` and `property.deactivate` require Tenant-wide authority.** A
+   property administrator responsible for the Harbour should not be able to create - or
+   retire - a Property elsewhere in the estate, and AC-4 asks for that refusal to be
+   server-side rather than an absent menu item.
+
+**Dead code a gate was watching, removed.** `resolvePrincipal` and
+`resolveTenantPrincipal` in `edge/src/auth.ts` are gone: the server no longer calls them,
+and **negative controls 23 and 28 pointed at them.** Leaving them exported would have left
+two gates passing while testing functions nothing served - false assurance, which is worse
+than no gate. Both controls now exercise the live path (`resolveCellPrincipal`, and the
+server's own Property demand), and control 23 was strengthened to set all **three** signing
+secrets alike rather than two.
+
+**Six new negative controls, 29-34**: the permission gate answering yes to everything; a
+PIN carrying configuration permissions; per-pair authorisation permitting everything; the
+session secret falling back instead of failing closed; the outbox becoming readable to the
+cell; and Jazzware being granted SELECT on customer staff. Controls 33 and 34 need the cell
+up, like 26.
+
+**What is NOT built, flagged rather than worked around.**
+
+- **Nothing delivers an invitation.** The AD-8 notification adapter does not exist, so a
+  set-up link and a reset link are written to `control_plane.outbox` and go no further. The
+  suite reads that table the way the adapter will. **This is an R1 release blocker, not a
+  test inconvenience**: today a real administrator cannot complete a sign-up without
+  somebody reading a database table.
+- **Self-service reset with no second factor.** The policy is settled and deliberate, and
+  what it costs is now written at the endpoint as well as in ADR 0002: until FR-84/FR-85
+  ship in Epic 12 (R2), every password account here is a mailbox away from takeover.
+- **An email address does not identify a person across Tenants.** Unique within a Tenant,
+  deliberately not across them - global uniqueness would make an invitation's 409 reveal an
+  account at another Tenant, the exact leak FR-1 exists to prevent. Sign-in resolves an
+  address against every Tenant and requires exactly one password to match; the same address
+  and the same password at two Tenants cannot be resolved and is refused generically, and
+  logged. The fix is a Tenant hint, and the slug that carries it arrives with SSO in Story
+  1.5. Raised as ADR 0002 question 7.
+- **Rate limiting is per process.** `edge/src/rate-limit.ts` is an in-memory fixed window;
+  two replicas double the effective limit. Real, and not dressed up as more. The durable
+  version belongs with ADR 0002's still-unowned PIN lockout policy. Question 8.
+- **PIN sign-in needs a way to resolve a person.** This story provisions the credential;
+  4.1 owns the sign-in. The assumption left for it is a **staff picker then a PIN** on the
+  Shared Device. Question 9, to be confirmed there rather than inherited silently.
+- **No role editor and no revocation path**, per the scope guards - and enforced rather
+  than merely omitted: `jt_app` holds no DELETE on `staff_roles`, `staff_members`,
+  `staff_credentials` or `sessions`, so a handler written for something else cannot reach
+  one by accident. Story 1.4 grants what it needs.
+
+**VERIFIED BY EXECUTION, and it found three defects.** The bridge VM has no Docker and
+no Postgres, so the source tree was mirrored into this session's cloud container, all
+eight migrations applied to a real Postgres 16 from scratch, and the suite and the
+controls run there. **The results below are from that sandbox and are not a substitute
+for `npm run refresh` on the Mac** - two defects in earlier stories lived precisely in
+the gap between the two - but they are what reading could not have found:
+
+- **136/136 tests pass; 33 of 35 negative controls red-verified**, 0 failures, 1
+  unverifiable (the Dart half, no SDK), 1 skipped (console dependencies not installed
+  there). Every one of the six new controls goes red on demand.
+- **Defect 1, a leak in `GET /v1/staff?propertyId=`.** A Tenant-wide caller has no
+  per-Property authority list, so the authority check could not fire, and the query's
+  `property_id IS NULL` branch then returned every Tenant-wide Staff Member for a filter
+  naming **another Tenant's** Property. No other Tenant's records ever came back, so
+  cross-tenant isolation held - but the answer was wider than what the caller asked for,
+  which is the exact thing that function's own comment promised could not happen. Fixed
+  by confirming the filter's Property is in the caller's Tenant first, and the test now
+  asserts **both** halves so the empty answer cannot pass by accident.
+- **Defect 2, a boundary I had quietly reversed.** Redeeming an invitation needs to read
+  one, so the first version granted `jt_app` SELECT on `control_plane.invitations` -
+  which migration 004 had revoked on purpose and `tests/provisioning.test.ts` asserts.
+  The suite caught it. The cell now holds **no privilege on that table at all** and gets
+  three SECURITY DEFINER functions instead: a lookup by token hash (which cannot
+  enumerate, and takes a row lock so single-use is a database property rather than a
+  timing accident), a redemption that refuses a second attempt, and an issue function
+  whose scope is hard-coded to `staff_member` so a cell can never mint a
+  `tenant_administrator` invitation. Strictly stronger than what was there before, and
+  negative control 35 proves the assertion bites.
+- **Defect 3, a third dead gate - control 14 had gone vacuous.** It flipped
+  `x-story: "1.3"` + `x-implemented: false` and expected the smoke suite to go red;
+  Story 1.3 built all six of those operations, so the patch matched nothing and the
+  control passed while testing nothing. It is now story-agnostic - it flips whichever
+  operation is unbuilt first - and reports UNVERIFIED rather than passing once the last
+  flag flips. **That is three gates in one story found watching something that had moved**
+  (23, 28 and 14), which is worth saying out loud: a gate is only as good as the last
+  time somebody checked what it was pointed at.
+
+**Housekeeping done:** `_to_delete/` (19 git lock files from the bridge's
+delete-permission workaround) was tracked in git; it is now untracked and gitignored,
+along with `*.tgz`.
+
 ### File List
+
+**New**
+
+- `contracts/openapi.yaml` - `/roles`, `/staff` (post, get); schemas `Role`,
+  `RoleAssignment`, `InviteStaffMemberRequest`, `StaffMember`, `InvitedStaffMember`
+- `ops/migrations/008_staff_and_sessions.sql`
+- `core/src/staff/roles.ts` - the permission model (pure)
+- `core/src/staff/invite.ts` - the Staff Member aggregate (pure)
+- `app/src/staff/sessions.ts` - the decision, both credential paths, recovery, switching
+- `app/src/staff/invite-staff-member.ts` - invitation, staff list, role picker
+- `edge/src/session-token.ts` - real session tokens: own secret, own audience, fail closed
+- `edge/src/authorise.ts` - the single decision point's only caller
+- `edge/src/rate-limit.ts`
+- `docs/decisions/0003-one-permission-decision-point.md`
+- `tests/unit/staff.test.ts` (24 tests), `tests/staff.test.ts`
+
+**Changed**
+
+- `contracts/openapi.yaml` - six operations flipped to built; `Session` gains `region`,
+  `credentialType` gains `password` and `fixture`, `propertyId`/`region` become optional;
+  `PropertyRef` gains `region` and `active`; `CredentialSetUpRequest` gains `name` and
+  `languageTag`; the settled recovery policy and the address-collision limitation written
+  where the endpoints are
+- `contracts/generated/ts/*` - regenerated
+- `edge/src/server.ts` - auth routes, staff and role routes, permission gates on the
+  Story 1.2 Property routes, one clock reading per request, new error mappings
+- `edge/src/auth.ts` - `resolveFixtureClaims` added; the two dead resolvers removed
+- `edge/src/main.ts` - `SESSION_TOKEN_SECRET` checked at boot, as its own call
+- `adapters/src/crypto/credential.ts` - `generatePin`, `generateOneTimeToken`,
+  `hashOneTimeToken`
+- `adapters/src/postgres/pool.ts` - `withoutScope`, for the identity-resolution step only
+- `docs/decisions/0002-...md` - questions 4, 5 and 6 closed; 7-10 raised
+- `tests/isolation.test.ts` - a Staff Member with roles at two Properties; Jazzware cannot
+  read customer staff; the outbox is write-only to the cell; the Tenant-scope refusal
+  assertion strengthened
+- `tests/control-plane.test.ts` - `staff_members.email` allowlisted, with its reason
+- `tests/smoke.test.ts` - unbuilt count 20 -> 14, with the six named
+- `scripts/negative-controls.sh` - controls 23 and 28 rewired, 29-34 added
+- `scripts/dev-refresh.sh` - asserts the flipped operations no longer 501, and runs the
+  suite and the gates
+- `.env.example`, `docker-compose.yml`, `tests/harness.ts`, `package.json`

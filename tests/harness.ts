@@ -22,6 +22,10 @@ export async function start(): Promise<Harness> {
   // an ambient value that would make the suite pass or fail by environment.
   process.env.FIXTURE_AUTH_SECRET ??= 'suite-fixture-secret-not-a-real-one';
   process.env.CONTROL_PLANE_TOKEN_SECRET ??= 'suite-control-plane-secret-not-real';
+  // A THIRD distinct value, for the same reason the other two are distinct: if the
+  // suite set them alike it would pass while proving nothing about the separation
+  // the three surfaces depend on.
+  process.env.SESSION_TOKEN_SECRET ??= 'suite-staff-session-secret-not-real';
   const server: Server = createApp();
   await new Promise<void>((res) => server.listen(0, '127.0.0.1', () => res()));
   const addr = server.address();

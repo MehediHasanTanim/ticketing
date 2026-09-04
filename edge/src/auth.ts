@@ -68,32 +68,34 @@ function verified(authorization: string | undefined): { tenantId?: string; prope
 }
 
 /**
- * TENANT-SCOPED, for the one operation that has no Property yet: creating the first
- * one (Story 1.2). Returns a `TenantScope`, which is NOT assignable where a `Scope`
- * is required - so this cannot be handed to `withScope` or to any Property-scoped
- * handler, and a token carrying a Property is still fine here because a tenant
- * administrator who happens to be scoped somewhere can still create a Property.
+ * REMOVED IN STORY 1.3, and the removal is the point.
  *
- * What it must never become is a way to reach Property data without a Property: the
- * isolation gate asserts a Tenant-scoped token reads nothing from a cell table.
+ * This file used to export `resolvePrincipal` and `resolveTenantPrincipal`, and the
+ * server called them. Story 1.3 brought real session tokens, so both resolutions now
+ * happen in `authorise.ts` - which accepts a real session OR this stub - and the
+ * server's own check is what demands a Property (AD-3).
+ *
+ * Leaving the old pair exported would have been worse than untidy: two negative
+ * controls pointed at them, so a gate that used to go red would have kept passing
+ * while testing a function nothing served. A dead function a gate still watches is
+ * false assurance, which is the one thing worse than no gate. Controls 23 and 28 now
+ * exercise the live path.
  */
-export function resolveTenantPrincipal(authorization: string | undefined): TenantScope | undefined {
+
+
+/**
+ * The fixture payload, for the one caller that composes principals (`authorise.ts`).
+ * Exported rather than inlining `verified()` there, so the signature check still
+ * exists in exactly one place. Returns nothing unless `FIXTURE_AUTH=1`.
+ */
+export function resolveFixtureClaims(
+  authorization: string | undefined,
+): { tenantId: string; propertyId?: string; staffMemberId?: string } | undefined {
   const p = verified(authorization);
   if (!p?.tenantId) return undefined;
   return {
-    tenantId: asTenantId(p.tenantId),
-    ...(p.staffMemberId ? { staffMemberId: asStaffMemberId(p.staffMemberId) } : {}),
-  };
-}
-
-export function resolvePrincipal(authorization: string | undefined): Principal | undefined {
-  const p = verified(authorization);
-  // STILL DEMANDS BOTH. Story 1.2 added a Tenant-scoped path; it did not soften
-  // this one, and a token with no Property is simply not a cell principal.
-  if (!p?.tenantId || !p.propertyId) return undefined;
-  return {
-    tenantId: asTenantId(p.tenantId),
-    propertyId: asPropertyId(p.propertyId),
-    ...(p.staffMemberId ? { staffMemberId: asStaffMemberId(p.staffMemberId) } : {}),
+    tenantId: p.tenantId,
+    ...(p.propertyId ? { propertyId: p.propertyId } : {}),
+    ...(p.staffMemberId ? { staffMemberId: p.staffMemberId } : {}),
   };
 }

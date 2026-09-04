@@ -79,3 +79,38 @@ export async function withTenantScope<T>(
     client.release();
   }
 }
+
+/**
+ * A transaction that pins NO SCOPE AT ALL, for the two or three operations that
+ * cannot have one yet (Story 1.3).
+ *
+ * Sign-in, credential set-up and password reset all have to resolve an identity
+ * BEFORE a Tenant is known - that is what they are for - so there is no
+ * `app.tenant_id` to pin. Rather than let those handlers reach for a raw pool client
+ * and quietly become the precedent for everything else, they get one named function
+ * whose comment says what it costs.
+ *
+ * What it does NOT cost: row-level security on every cell table requires both
+ * `app.tenant_id` and `app.property_id`, and neither is set here, so a query against
+ * `cell.events` or any other guest-bearing table inside this transaction returns
+ * NOTHING. That is not a happy accident - it is why an unscoped transaction is safe
+ * to offer at all, and the isolation gate asserts it.
+ *
+ * Control-plane tables carry no RLS (AD-4), so every query in here writes its own
+ * predicate. Use it only for the identity-resolution step, and switch to `withScope`
+ * or `withTenantScope` the moment a Tenant is known.
+ */
+export async function withoutScope<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    const out = await fn(client);
+    await client.query('COMMIT');
+    return out;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}

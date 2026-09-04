@@ -183,11 +183,13 @@ describe('cell smoke test', () => {
         if (op['x-implemented'] === false) unbuilt.push({ method, path, story: op['x-story'] });
       }
     }
-    // The twenty auth operations, and nothing else - a Story 1.0 operation marked
+    // The remaining auth operations, and nothing else - a Story 1.0 operation marked
     // unbuilt would mean something shipped that the spec says does not exist. This
-    // number goes DOWN as 1.3, 1.5, 4.1, 4.8 and Epic 12 land, and changing it is
-    // meant to be a deliberate edit rather than a silent one.
-    expect(unbuilt).toHaveLength(20);
+    // number goes DOWN as 1.5, 4.1, 4.8 and Epic 12 land, and changing it is meant to
+    // be a deliberate edit rather than a silent one. Twenty until Story 1.3, which
+    // built six: /auth/session, /auth/context, /auth/sign-in,
+    // /auth/credential/set-up, /auth/password/forgot and /auth/password/reset.
+    expect(unbuilt).toHaveLength(14);
     expect(unbuilt.every((o) => o.path.startsWith('/auth/'))).toBe(true);
 
     // And the converse, which is the assertion that actually bites: an operation

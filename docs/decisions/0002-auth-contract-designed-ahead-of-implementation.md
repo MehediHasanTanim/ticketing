@@ -279,9 +279,71 @@ guess the authority of a decision:
    exists, off by default (FR-84), and a tenant administrator can require it Tenant-wide
    (FR-85).** Epic 12, R2. Not required by the product for anyone; required by a Tenant for
    its own people at that Tenant's choice.
-6. **The region at sign-in.** The UX spine states the region at sign-in "because it is a
-   residency fact, not a detail" (DG-4), and `Session` carries no region field. Small, but
-   it belongs to whoever builds 1.3.
+6. ~~**The region at sign-in.**~~ **CLOSED 2026-09-04 by Story 1.3.** `Session.region` and
+   `PropertyRef.region` now carry it, so the console renders residency from the session it
+   already has rather than fetching each Property - which is how it would have ended up
+   rendered inconsistently.
+
+## Settled by Story 1.3, and worth keeping written down
+
+- **The 1.1 / 1.3 token agreement.** Provisioning records an invitation with an email
+  address and nothing else - a Jazzware operator has no business typing a customer
+  administrator's name or choosing their language - so `CredentialSetUpRequest` requires
+  `name` and `languageTag`, and redemption is where the person describes themselves.
+  Required for *every* redemption rather than only the first-administrator case, which
+  keeps one code path and leaks nothing: a set-up screen that asks a new arrival their
+  name is ordinary, and their own spelling should win over whatever an administrator
+  typed. Redemption creates the Staff Member when the invitation has none, with a
+  **Tenant-wide `property_administrator`** grant - there is no Property to scope it to,
+  and someone has to be able to create the first one.
+- **A session may be Tenant-scoped.** `Session.propertyId` and `Session.region` are
+  optional, which is the same single AD-3 exception `POST /properties` already was: FR-1
+  creates an administrator before any Property exists. A Property-scoped route answers
+  **403 naming the property picker**, not 401 - telling an authenticated person their
+  credential was rejected sends them looking for a token that was never the problem. The
+  cross-tenant isolation gate was updated to accept either refusal and to assert the thing
+  that actually matters, which is that no Property data comes back.
+- **Capability lives on the credential type, not the role** (FR-4). Each permission
+  declares a class and each credential type declares which classes it may carry, so a PIN
+  never authorises configuration or reporting whatever role its holder has - and a
+  permission added later is classified where it is declared rather than needing every
+  check revisited. See ADR 0003.
+- **`fixture` is a value of `Session.credentialType`.** Story 1.0's stub is named in the
+  wire contract rather than hidden. It is already a total authentication bypass for anyone
+  holding its secret, so withholding permissions from it would add no security while making
+  the isolation gate pass for the wrong reason; naming it means a session reporting
+  `fixture` in an environment that should not have one is visible from the outside. Story
+  1.5 removes it.
+
+## Raised by Story 1.3, still open
+
+7. **An email address does not identify a person across Tenants.** An address is unique
+   *within* a Tenant and deliberately not across them: global uniqueness would make an
+   invitation's 409 reveal that the address already has an account somewhere else, which is
+   precisely the cross-Tenant leak FR-1 exists to prevent. `POST /auth/sign-in` therefore
+   resolves an address against every Tenant and requires exactly one password to match. A
+   person holding accounts at two Tenants with the **same address and the same password**
+   cannot be resolved and is refused with the same generic failure as everyone else - and
+   cannot diagnose it, which is why the collision is logged. The fix is a Tenant hint, and
+   the slug that would carry it arrives with SSO in **Story 1.5**, so it is raised there
+   rather than invented here. With one or two Tenants in R1 the risk is theoretical; it
+   stops being theoretical at scale.
+8. **Rate limiting is per process.** `edge/src/rate-limit.ts` is a fixed-window counter in
+   memory, so two cell replicas double the effective limit. It is enough to make credential
+   stuffing from one source expensive and is deliberately not dressed up as more. A durable
+   limiter belongs with **question 2's** PIN lockout policy, which still has no owner and no
+   FR stating a threshold, a window or a lockout duration; Redis is already a dependency of
+   the cell, so the implementation is small once somebody decides the numbers.
+9. **PIN sign-in needs a way to resolve a person.** Story 1.3 provisions the PIN credential
+   and Story 4.1 owns the sign-in. Six digits with no staff reference is not resolvable and
+   would not be safe if it were, so the assumption this story leaves for 4.1 is a **staff
+   picker then a PIN** on the Shared Device - the person taps their name, then types the
+   PIN. Confirm it there rather than inheriting it silently.
+10. **Nothing delivers an invitation yet.** The AD-8 notification adapter does not exist, so
+    a set-up link and a reset link are written to `control_plane.outbox` and go no further.
+    Story 1.3's suite reads them the way that adapter will. Until it is built, a real
+    administrator cannot complete a sign-up without someone reading that table - which is a
+    release blocker for R1, not a test inconvenience.
 
 ## Alternatives considered
 

@@ -3,6 +3,7 @@ import { cellName } from '../../adapters/src/postgres/config';
 import { closePool } from '../../adapters/src/postgres/pool';
 import { fixtureSecretOrThrow } from './auth';
 import { controlPlaneSecretOrThrow, CONTROL_PLANE_ENABLED } from './control-plane/operator-auth';
+import { sessionSecretOrThrow } from './session-token';
 
 /**
  * Configuration is checked BEFORE the listener opens, so a missing secret is a
@@ -14,6 +15,11 @@ import { controlPlaneSecretOrThrow, CONTROL_PLANE_ENABLED } from './control-plan
 const assertSecretsPresent = (): void => {
   if (process.env.FIXTURE_AUTH === '1') fixtureSecretOrThrow();
   if (CONTROL_PLANE_ENABLED) controlPlaneSecretOrThrow();
+  // Story 1.3: a cell signs every staff session with this, so it is unconditional.
+  // Each check is a SEPARATE call for a reason worth remembering - when these were
+  // folded together, the first failure masked the others and all the failure cases
+  // printed the same message, so three of them were never actually exercised.
+  sessionSecretOrThrow();
 };
 
 try {

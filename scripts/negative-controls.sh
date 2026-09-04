@@ -137,19 +137,34 @@ expect_red "container gate, nginx pid path (AC-5)" node scripts/gate-containers.
 cp /tmp/console.pid.bak clients/console/Dockerfile
 
 echo "== 14. auth contract: mark a designed-ahead operation as built, with no handler =="
-# The whole risk of designing the auth surface ahead of the four stories that build
-# it: a spec that claims an endpoint exists when nothing serves it. Flipping the
-# flag must not be a way to mark work done.
+# The whole risk of designing the auth surface ahead of the stories that build it: a
+# spec that claims an endpoint exists when nothing serves it. Flipping the flag must
+# not be a way to mark work done.
+#
+# STORY-AGNOSTIC, and that is a correction rather than a preference. This control used
+# to target `x-story: "1.3"` specifically, so the moment Story 1.3 built all six of
+# its operations the patch matched nothing, the smoke suite stayed green, and the
+# control passed while testing nothing at all. Found by running the suite, not by
+# reading it. It now flips whichever operation is unbuilt FIRST, whoever owns it - and
+# when the last flag flips it reports UNVERIFIED rather than quietly passing, because
+# at that point there is nothing left for it to break.
 cp contracts/openapi.yaml /tmp/openapi.nc.bak
-python3 - <<'PY2'
-import pathlib
+if grep -q '^      x-implemented: false$' contracts/openapi.yaml; then
+  python3 - <<'PY2'
+import pathlib, re
 p = pathlib.Path('contracts/openapi.yaml'); t = p.read_text()
-p.write_text(t.replace('      x-story: "1.3"\n      x-implemented: false',
-                       '      x-story: "1.3"\n      x-implemented: true', 1))
+p.write_text(re.sub(r'^      x-implemented: false$', '      x-implemented: true', t, count=1, flags=re.M))
 PY2
-npm run --silent codegen >/dev/null 2>&1
-expect_red "auth contract, unbuilt operation claimed built" npm run --silent smoke
-cp /tmp/openapi.nc.bak contracts/openapi.yaml
+  npm run --silent codegen >/dev/null 2>&1
+  expect_red "auth contract, unbuilt operation claimed built" npm run --silent smoke
+  cp /tmp/openapi.nc.bak contracts/openapi.yaml
+  npm run --silent codegen >/dev/null 2>&1
+else
+  # Every designed-ahead operation has been built. Nothing to break, so nothing is
+  # proven - do NOT count it as a pass.
+  echo "  UNVERIFIED  no operation is marked x-implemented: false, so this control is vacuous."
+  unverified=$((unverified+1))
+fi
 
 echo "== 15. auth contract: designed-ahead operation with no owning story =="
 # An unowned stub is one nobody will ever remove.
@@ -248,19 +263,27 @@ psql "${DATABASE_URL_ADMIN}" -q -c 'DROP TRIGGER tenants_no_delete ON control_pl
 expect_red "deactivate never delete (Story 1.1 AC-4)" npx vitest run tests/provisioning.test.ts
 psql "${DATABASE_URL_ADMIN}" -q -c 'CREATE TRIGGER tenants_no_delete BEFORE DELETE ON control_plane.tenants FOR EACH ROW EXECUTE FUNCTION control_plane.refuse_tenant_delete();' >/dev/null 2>&1
 
-echo "== 23. cross-surface tokens: make the two surfaces share one secret =="
-# The audience check is what survives this. If it is ever removed, an operator
-# token becomes a cell token the moment someone misconfigures the secrets alike.
-expect_red "cross-surface tokens, shared secret defeated by the audience check" \
+echo "== 23. cross-surface tokens: make ALL THREE surfaces share one secret =="
+# The audience check is what survives this. If it is ever removed, an operator token
+# becomes a cell token the moment someone misconfigures the secrets alike.
+#
+# THREE secrets since Story 1.3 - fixture stub, staff session, Jazzware operator -
+# so all three are set alike here and the live resolver is the one under test.
+# `resolveCellPrincipal` is what the server actually calls; the pair this control
+# used to poke at was deleted in Story 1.3 precisely so that this control could not
+# keep passing against a function nothing serves.
+expect_red "cross-surface tokens, one shared secret defeated by the audience check" \
   env CONTROL_PLANE_TOKEN_SECRET="${FIXTURE_AUTH_SECRET:?set it in .env}" \
+      SESSION_TOKEN_SECRET="${FIXTURE_AUTH_SECRET:?set it in .env}" \
   node -e '
     const { mintOperatorToken } = require("./dist/edge/src/control-plane/operator-auth.js");
-    const { resolvePrincipal } = require("./dist/edge/src/auth.js");
+    const { resolveCellPrincipal } = require("./dist/edge/src/authorise.js");
     process.env.FIXTURE_AUTH = "1";
     const t = mintOperatorToken({ operatorId: "01O-x", sessionId: "01S-x", expiresAt: new Date(Date.now() + 60000) });
-    // With the secrets identical the signature verifies, so ONLY the audience
-    // check can refuse it. If this resolves, the cell has accepted an operator.
-    if (resolvePrincipal("Bearer " + t)) { console.error("the cell accepted an operator token"); process.exit(0); }
+    // With every secret identical the signature verifies on all three paths, so ONLY
+    // the audience check can refuse it. If this resolves, the cell has accepted an
+    // operator credential.
+    if (resolveCellPrincipal("Bearer " + t, new Date())) { console.error("the cell accepted an operator token"); process.exit(0); }
     process.exit(1);
   '
 
@@ -336,19 +359,133 @@ expect_red "setup list derived from real state (Story 1.2 T4)" npx vitest run te
 cp /tmp/steps.nc.bak core/src/property/setup-steps.ts
 
 echo "== 28. Tenant scope: let a Tenant-only credential reach Property data =="
-# Story 1.2 added a Tenant-scoped principal for the one operation with no Property.
-# If `resolvePrincipal` ever stops demanding a Property, that credential becomes a
-# way into Property-scoped data with no Property predicate.
-cp edge/src/auth.ts /tmp/auth.nc.bak
+# Story 1.2 added a Tenant-scoped principal for the one operation with no Property,
+# and Story 1.3 made it the ordinary first state of a real administrator. If the
+# tenancy boundary ever stops DEMANDING a Property, that credential becomes a way
+# into Property-scoped data with no Property predicate.
+#
+# Patched at the live check in server.ts rather than at the resolver: the old
+# resolver was deleted, and this control breaking it would have proved nothing.
+# Both lines are needed, so the request actually PROCEEDS instead of crashing on a
+# missing scope - a control that goes red because the process threw would not
+# distinguish "the boundary stopped refusing" from "the code no longer compiles".
+cp edge/src/server.ts /tmp/server.nc.bak
 python3 - <<'PY2'
 import pathlib
-p = pathlib.Path('edge/src/auth.ts'); t = p.read_text()
-t = t.replace("  if (!p?.tenantId || !p.propertyId) return undefined;",
-              "  if (!p?.tenantId) return undefined;", 1)
+p = pathlib.Path('edge/src/server.ts'); t = p.read_text()
+t = t.replace("      if (!cell.propertyId) {", "      if (false) {", 1)
+t = t.replace("        propertyId: asPropertyId(cell.propertyId),",
+              "        propertyId: asPropertyId(cell.propertyId ?? '01P-not-a-real-property'),", 1)
 p.write_text(t)
 PY2
-expect_red "Tenant scope cannot reach Property data (Story 1.2)" npx vitest run tests/isolation.test.ts
-cp /tmp/auth.nc.bak edge/src/auth.ts
+expect_red "Tenant scope cannot reach Property data (Stories 1.2, 1.3)" npx vitest run tests/isolation.test.ts
+cp /tmp/server.nc.bak edge/src/server.ts
+
+echo "== 29. permission gate: make every permission question answer yes =="
+# AD-11 is the whole of Story 1.3: permission is a SERVER decision and the interface
+# only hides what the server would refuse. `resolvePermissions` is the one place a
+# permission question is answered, so if it ever grants everything, every refusal in
+# the story - the crafted payload, the line-staff credential, the PIN - stops being a
+# refusal while every screen keeps looking the same.
+cp core/src/staff/roles.ts /tmp/roles.nc.bak
+python3 - <<'PY2'
+import pathlib
+p = pathlib.Path('core/src/staff/roles.ts'); t = p.read_text()
+t = t.replace("  const classes = CREDENTIAL_CLASSES[credentialType];",
+              "  return { permissions: [...ALL_PERMISSIONS], unmappedRoles: [] };\n  const classes = CREDENTIAL_CLASSES[credentialType];", 1)
+p.write_text(t)
+PY2
+expect_red "permission is a server decision (AD-11, Story 1.3 AC-4)" npx vitest run tests/unit/staff.test.ts
+cp /tmp/roles.nc.bak core/src/staff/roles.ts
+
+echo "== 30. PIN capability: let a PIN carry configuration permissions =="
+# FR-4, and the failure the story names out loud: "a PIN alone must never authorise
+# configuration or reporting surfaces - encode that as a property of the credential
+# type, not of the role, or a PIN-holding administrator becomes a hole." A PIN is
+# four to six digits typed on a handset that lives in a corridor.
+cp core/src/staff/roles.ts /tmp/roles.nc.bak
+python3 - <<'PY2'
+import pathlib
+p = pathlib.Path('core/src/staff/roles.ts'); t = p.read_text()
+t = t.replace("  pin: ['operational'],", "  pin: ['operational', 'configuration', 'reporting'],", 1)
+p.write_text(t)
+PY2
+expect_red "a PIN carries no configuration permission (FR-4)" npx vitest run tests/unit/staff.test.ts
+cp /tmp/roles.nc.bak core/src/staff/roles.ts
+
+echo "== 31. per-pair authorisation: permit every (Property, role) pair =="
+# AC-4 asks for the crafted direct API call to be refused, not only hidden. The
+# refusal is per PAIR: an administrator scoped to one Property must not be able to
+# grant a role at another, and a pair naming another Tenant's Property must answer
+# not_found rather than confirming it exists.
+cp core/src/staff/invite.ts /tmp/invite.nc.bak
+python3 - <<'PY2'
+import pathlib
+p = pathlib.Path('core/src/staff/invite.ts'); t = p.read_text()
+t = t.replace("  if (pair.propertyId === null) {", "  return 'permitted';\n  if (pair.propertyId === null) {", 1)
+p.write_text(t)
+PY2
+expect_red "each (Property, role) pair is authorised separately (Story 1.3 AC-4)" \
+  npx vitest run tests/unit/staff.test.ts
+cp /tmp/invite.nc.bak core/src/staff/invite.ts
+
+echo "== 32. session secret fails closed: reinstate a fallback =="
+# The third signing secret, on the same terms as the other two. A cell signs EVERY
+# staff session with it, so a published fallback would let anyone reading this
+# repository mint a session for any Tenant, any Property and any role.
+#
+# Exercised through the exported check rather than by booting a server, for the
+# reason control 25 records: a control that cannot finish is worse than no control.
+cp edge/src/session-token.ts /tmp/session.nc.bak
+python3 - <<'PY2'
+import pathlib, re
+p = pathlib.Path('edge/src/session-token.ts'); t = p.read_text()
+t = re.sub(r"  if \(!v \|\| v\.length === 0\) \{\n(?:.*\n)*?  \}\n",
+           "  if (!v || v.length === 0) return 'story-1-3-session-local-only';\n",
+           t, count=1)
+p.write_text(t)
+PY2
+npm run --silent build >/dev/null 2>&1
+expect_red "session secret fails closed, no fallback signing key (Story 1.3)" \
+  env -u SESSION_TOKEN_SECRET node -e '
+    const { sessionSecretOrThrow } = require("./dist/edge/src/session-token.js");
+    try {
+      sessionSecretOrThrow();
+      console.error("handed out a session signing secret with the variable unset");
+      process.exit(1);          // the check FAILED - which is what expect_red wants
+    } catch {
+      process.exit(0);          // correctly refused
+    }'
+cp /tmp/session.nc.bak edge/src/session-token.ts
+npm run --silent build >/dev/null 2>&1
+
+echo "== 33. the outbox is write-only to the cell: grant it SELECT =="
+# The cell queues an invitation or a reset link and cannot read one back, which is
+# what stops any query, report or later handler harvesting a pending credential. The
+# cell generated the token in memory, so this is not secrecy from itself - it is that
+# the token exists in a readable form nowhere.
+psql "${DATABASE_URL_ADMIN}" -q -c 'GRANT SELECT ON control_plane.outbox TO jt_app;' >/dev/null 2>&1
+expect_red "the outbox is write-only to the cell (Story 1.3)" npx vitest run tests/isolation.test.ts
+psql "${DATABASE_URL_ADMIN}" -q -c 'REVOKE SELECT ON control_plane.outbox FROM jt_app;' >/dev/null 2>&1
+
+echo "== 34. Jazzware has no standing access to customer staff: grant it SELECT =="
+# FR-1: provisioning grants no standing access to customer data, and a customer's
+# staff list - names, work addresses, who holds authority where - is customer data.
+# Story 11.3's time-boxed, customer-visible support grant is the only route in.
+psql "${DATABASE_URL_ADMIN}" -q -c 'GRANT SELECT ON control_plane.staff_members TO jt_control;' >/dev/null 2>&1
+expect_red "Jazzware cannot read customer staff (FR-1, Story 1.3)" npx vitest run tests/isolation.test.ts
+psql "${DATABASE_URL_ADMIN}" -q -c 'REVOKE SELECT ON control_plane.staff_members FROM jt_control;' >/dev/null 2>&1
+
+echo "== 35. the cell has no sight of invitations: grant it SELECT on the table =="
+# Story 1.3 needs to redeem an invitation, which migration 004 had deliberately put
+# out of the cell role's reach. The first attempt granted SELECT back - a quiet
+# reversal of a documented boundary that `tests/provisioning.test.ts` catches, which
+# is how it was found. The cell now gets three SECURITY DEFINER functions and no
+# table privilege: a lookup by token hash cannot enumerate, and an issue function
+# with a hard-coded scope cannot mint a tenant_administrator invitation.
+psql "${DATABASE_URL_ADMIN}" -q -c 'GRANT SELECT ON control_plane.invitations TO jt_app;' >/dev/null 2>&1
+expect_red "the cell has no sight of invitations (FR-1, migration 004)" npx vitest run tests/provisioning.test.ts
+psql "${DATABASE_URL_ADMIN}" -q -c 'REVOKE SELECT ON control_plane.invitations FROM jt_app;' >/dev/null 2>&1
 
 echo
 echo "negative controls: ${pass} correctly went red, ${fail} did not, ${unverified} unverifiable here"

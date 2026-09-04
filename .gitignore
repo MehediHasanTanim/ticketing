@@ -10,3 +10,7 @@ clients/console/dist/
 *.tgz
 *.tar
 *.bundle
+
+# The bridge cannot delete files on the Mac without a per-session grant, so things
+# to be removed are parked here. Never committed - 19 git lock files were, once.
+_to_delete/

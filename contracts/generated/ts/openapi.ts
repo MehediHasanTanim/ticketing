@@ -9,7 +9,7 @@ export const OPENAPI_DOCUMENT = {
   "info": {
     "title": "JazzTicketing API",
     "version": "0.1.0",
-    "description": "Commands are POSTs returning the accepted event; reads are projections. Every request resolves to exactly one Tenant and Property.\n\nStory 1.0 built the health, docs, SLA-fold and isolation-fixture surfaces. The `auth` operations are DESIGNED HERE AND BUILT LATER: each is marked `x-implemented: false` with an `x-story` naming its owner, and each answers 501 `not_implemented` until that story lands."
+    "description": "Commands are POSTs returning the accepted event; reads are projections. Every request resolves to exactly one Tenant and Property.\n\nStory 1.0 built the health, docs, SLA-fold and isolation-fixture surfaces; 1.1 and 1.2 brought Tenant provisioning and Properties; 1.3 brought Staff Members, roles per Property and the session. The remaining `auth` operations are DESIGNED HERE AND BUILT LATER: each is marked `x-implemented: false` with an `x-story` naming its owner, and each answers 501 `not_implemented` until that story lands. A flag flipped without a handler behind it makes the smoke suite red, so it cannot be used to mark work done."
   },
   "servers": [
     {
@@ -37,6 +37,10 @@ export const OPENAPI_DOCUMENT = {
     {
       "name": "properties",
       "description": "Properties, created by a tenant administrator on their own authority (FR-1). The only TENANT-scoped operations here: creating the first Property has no Property to be scoped to, which is the one thing AD-3 cannot cover."
+    },
+    {
+      "name": "staff",
+      "description": "Staff Members, their roles per Property, and the shipped role set. TENANT-scoped for the same reason as properties: an invitation spans Properties, so it cannot be scoped to one."
     },
     {
       "name": "isolation-fixture",
@@ -283,7 +287,6 @@ export const OPENAPI_DOCUMENT = {
           "auth"
         ],
         "x-story": "1.3",
-        "x-implemented": false,
         "summary": "Who the caller is, where they are scoped, and what they may do.",
         "description": "The single server-side permission decision point that the interface queries (AD-11, Story 1.3 T4). One place answers a permission question; two answers is how a hidden button becomes a security bug. Carries no guest data of any kind (DG-1) and no staff attribute beyond what a session needs.",
         "responses": {
@@ -299,9 +302,6 @@ export const OPENAPI_DOCUMENT = {
           },
           "401": {
             "$ref": "#/components/responses/Error"
-          },
-          "501": {
-            "$ref": "#/components/responses/NotImplemented"
           }
         }
       }
@@ -313,7 +313,6 @@ export const OPENAPI_DOCUMENT = {
           "auth"
         ],
         "x-story": "1.3",
-        "x-implemented": false,
         "summary": "Switch Property without signing out.",
         "description": "A Staff Member holding roles at two Properties in one Tenant switches context and their permissions are RE-RESOLVED server-side for the new Property (Story 1.3 AC-3). Because every token carries `tenant_id` and `property_id` (AD-3), a switch MINTS A NEW TOKEN rather than reinterpreting the old one - a scope that a header can change is not a scope. The Tenant never changes: a `propertyId` in another Tenant answers `not_found`, not `forbidden`, so the response cannot be used to discover that a Property exists elsewhere. A Property in this Tenant where the caller holds no role answers `forbidden`.",
         "requestBody": {
@@ -348,9 +347,6 @@ export const OPENAPI_DOCUMENT = {
           },
           "404": {
             "$ref": "#/components/responses/Error"
-          },
-          "501": {
-            "$ref": "#/components/responses/NotImplemented"
           }
         }
       }
@@ -462,7 +458,6 @@ export const OPENAPI_DOCUMENT = {
           "auth"
         ],
         "x-story": "1.3",
-        "x-implemented": false,
         "security": [],
         "summary": "Redeem an invitation and set a password.",
         "description": "The other end of Story 1.3's \"an invitation with an email address issues a credential set-up link\", and of Story 1.1's first-administrator invitation. Returns a session, because the holder has just proved control of the mailbox the invitation was sent to and there is no earlier session to protect - for a first administrator on a brand-new Tenant, making them sign in again immediately buys nothing.\n\nSEQUENCING: Story 1.1 issues the first invitation and Story 1.3 redeems it, so the two must agree the token's shape before either starts - the same arrangement 4.1 and 4.3 have over the offline queue. Between them a provisioned Tenant has an administrator who cannot yet sign in.\n\nThe token is single-use and short-lived. Every rejection - unknown, expired, already used - is one generic `validation_failed`, so the endpoint cannot be used to learn that an invitation existed.",
@@ -492,9 +487,6 @@ export const OPENAPI_DOCUMENT = {
           },
           "429": {
             "$ref": "#/components/responses/TooManyAttempts"
-          },
-          "501": {
-            "$ref": "#/components/responses/NotImplemented"
           }
         }
       }
@@ -506,10 +498,9 @@ export const OPENAPI_DOCUMENT = {
           "auth"
         ],
         "x-story": "1.3",
-        "x-implemented": false,
         "security": [],
         "summary": "Sign in with an email address and a password.",
-        "description": "The documented fallback for corporate and management users whose Tenant has not connected an identity provider. Where a Tenant HAS connected one, this is refused for identities that provider governs - otherwise connecting SSO would leave a second, weaker door open beside it, and FR-3's promise that a deprovisioned identity loses access would be worth nothing.\n\nOne generic failure for every rejection - unknown address, wrong password, disabled account, an address governed by a connected provider - so the screen cannot be used to discover who has an account or which Tenants use SSO. Rate-limited per address and per source. Never logs the password, and never accepts it in a query string.\n\nThe response's `session.switchableProperties` is what the property picker on this surface renders; a caller with one Property gets one entry and the picker does not appear.",
+        "description": "The documented fallback for corporate and management users whose Tenant has not connected an identity provider. Where a Tenant HAS connected one, this is refused for identities that provider governs - otherwise connecting SSO would leave a second, weaker door open beside it, and FR-3's promise that a deprovisioned identity loses access would be worth nothing.\n\nOne generic failure for every rejection - unknown address, wrong password, disabled account, an address governed by a connected provider - so the screen cannot be used to discover who has an account or which Tenants use SSO. Rate-limited per address and per source. Never logs the password, and never accepts it in a query string.\n\nThe response's `session.switchableProperties` is what the property picker on this surface renders; a caller with one Property gets one entry and the picker does not appear.\n\nLIMITATION, FLAGGED RATHER THAN HIDDEN. An email address is unique within a Tenant and NOT across Tenants - global uniqueness would make an invitation's 409 reveal that the address already has an account somewhere else, which is precisely the cross-Tenant leak FR-1 exists to prevent. So this operation resolves the address against every Tenant and requires exactly one password to match. A person who holds accounts at two Tenants with the SAME address and the SAME password cannot be resolved and is refused with the same generic failure as everyone else; the collision is logged for an operator. The proper fix is a Tenant hint, and the slug that would carry it arrives with SSO in Story 1.5 - so it is raised there rather than invented here.",
         "requestBody": {
           "required": true,
           "content": {
@@ -549,9 +540,6 @@ export const OPENAPI_DOCUMENT = {
           },
           "429": {
             "$ref": "#/components/responses/TooManyAttempts"
-          },
-          "501": {
-            "$ref": "#/components/responses/NotImplemented"
           }
         }
       }
@@ -563,10 +551,9 @@ export const OPENAPI_DOCUMENT = {
           "auth"
         ],
         "x-story": "1.3",
-        "x-implemented": false,
         "security": [],
         "summary": "Ask for a password reset link.",
-        "description": "OPEN QUESTION, DESIGNED NO FURTHER THAN THE SHAPE. No FR covers credential recovery - it is a gap raised against the PRD, not a decision taken here - and Story 1.3's acceptance criteria do not currently require it. What is undecided is the policy: whether self-service reset is permitted at all for an administrator, or whether recovery goes through a Jazzware support request. It matters because an administrator locked out of a Tenant with no identity connection has no other way in, and because a self-service reset on an account without a second factor is a password-reset takeover. **Settle it in epics.md before building this.**\n\nThe shape itself is not in doubt: **always 202**, whether or not the address exists, whether or not it is governed by SSO. A response that differs is an account-enumeration oracle, and this is the one endpoint on the product that anyone can call.",
+        "description": "POLICY SETTLED 2026-09-04: self-service reset IS permitted (ADR 0002, question 4). What that costs is worth writing down where the endpoint lives rather than only in the ADR: for a Staff Member with NO SECOND FACTOR enrolled, this endpoint makes control of the mailbox sufficient to take the account. MFA exists to close that (FR-84, FR-85) and is Epic 12 in R2, so until it ships every password account here is a mailbox away from takeover. That is a deliberate position, not an oversight.\n\nThe shape itself is not in doubt: **always 202**, whether or not the address exists, whether or not it is governed by SSO. A response that differs is an account-enumeration oracle, and this is the one endpoint on the product that anyone can call.",
         "requestBody": {
           "required": true,
           "content": {
@@ -586,9 +573,6 @@ export const OPENAPI_DOCUMENT = {
           },
           "429": {
             "$ref": "#/components/responses/TooManyAttempts"
-          },
-          "501": {
-            "$ref": "#/components/responses/NotImplemented"
           }
         }
       }
@@ -600,10 +584,9 @@ export const OPENAPI_DOCUMENT = {
           "auth"
         ],
         "x-story": "1.3",
-        "x-implemented": false,
         "security": [],
         "summary": "Set a new password from a reset token.",
-        "description": "Governed by the same open question as `/auth/password/forgot`.\n\nReturns **204 and no session**, unlike credential set-up, and REVOKES EVERY OTHER SESSION for that Staff Member. The asymmetry is deliberate: a set-up is a first arrival with nothing to protect, while a reset may be the response to a credential already in someone else's hands, so it has to end the sessions that credential could have opened - including on any Shared Device. The holder signs in again through `/auth/sign-in`, which is also the only way they learn the new password works.\n\nToken single-use and short-lived, delivered in a URL fragment and submitted in this body. One generic `validation_failed` for unknown, expired and already-used alike.",
+        "description": "Governed by the same settled policy as `/auth/password/forgot`.\n\nReturns **204 and no session**, unlike credential set-up, and REVOKES EVERY OTHER SESSION for that Staff Member. The asymmetry is deliberate: a set-up is a first arrival with nothing to protect, while a reset may be the response to a credential already in someone else's hands, so it has to end the sessions that credential could have opened - including on any Shared Device. The holder signs in again through `/auth/sign-in`, which is also the only way they learn the new password works.\n\nToken single-use and short-lived, delivered in a URL fragment and submitted in this body. One generic `validation_failed` for unknown, expired and already-used alike.",
         "requestBody": {
           "required": true,
           "content": {
@@ -623,9 +606,6 @@ export const OPENAPI_DOCUMENT = {
           },
           "429": {
             "$ref": "#/components/responses/TooManyAttempts"
-          },
-          "501": {
-            "$ref": "#/components/responses/NotImplemented"
           }
         }
       }
@@ -1112,6 +1092,134 @@ export const OPENAPI_DOCUMENT = {
           },
           "501": {
             "$ref": "#/components/responses/NotImplemented"
+          }
+        }
+      }
+    },
+    "/roles": {
+      "get": {
+        "operationId": "listRoles",
+        "tags": [
+          "staff"
+        ],
+        "x-story": "1.3",
+        "summary": "The role picker's contents.",
+        "description": "AC-2: the picker offers AT MINIMUM line staff, supervisor, department manager, front office, duty manager, property administrator and corporate viewer. Those seven are seeded per Tenant by Story 1.1, so this reads the Tenant's own roles rather than a constant - which is also what makes Story 1.4's custom roles appear here without changing this operation.\n\n`assignableAtTenantScope` is the part a picker cannot infer: a corporate viewer's authority IS the Tenant (AC-5) and a property administrator may hold either scope, while a line staff role assigned Tenant-wide would be a silent privilege grant across every Property.",
+        "responses": {
+          "200": {
+            "description": "the Tenant's roles, shipped ones first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Role"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/staff": {
+      "post": {
+        "operationId": "inviteStaffMember",
+        "tags": [
+          "staff"
+        ],
+        "x-story": "1.3",
+        "summary": "Invite a person and give them roles at one or more Properties.",
+        "description": "The Staff Member is created with EXACTLY the roles requested at exactly the Properties requested (AC-1). Two credential paths, decided by whether an email address is present:\n\n**With an email**: an invitation is recorded and a credential set-up link is queued for delivery. The token travels in the link's FRAGMENT and is redeemed at `/auth/credential/set-up`.\n\n**Without an email**: a PIN-only account usable on a Shared Device. The PIN is returned in THIS RESPONSE AND NOWHERE ELSE - there is no mailbox to send it to, so the inviting administrator is the only channel, and only its hash is stored. A PIN never authorises configuration or reporting surfaces whatever role it carries (FR-4); that limit belongs to the credential, not to the role.\n\nAUTHORISED PER PAIR, not per request: an administrator scoped to one Property cannot grant a role at another, and a crafted payload naming a Property in another Tenant answers `not_found` rather than `forbidden`, so the response cannot be used to discover that it exists.\n\nStaff data is governed by DG-5. A payroll identifier or a date of birth is REFUSED rather than ignored - silently dropping a field a caller believed was stored is how a system ends up with two beliefs about what it holds.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InviteStaffMemberRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "the Staff Member, and the PIN if this is a PIN-only account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitedStaffMember"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "this email address already belongs to a Staff Member in this Tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listStaffMembers",
+        "tags": [
+          "staff"
+        ],
+        "x-story": "1.3",
+        "summary": "The Staff Members I may see.",
+        "description": "AC-5, on a real read rather than a hypothetical one: a corporate-scoped Staff Member receives only records from Properties WITHIN THEIR OWN TENANT, and a Property-scoped one only from the Properties they hold a role at. The predicate is applied server-side; `propertyId` narrows the answer and can never widen it.",
+        "parameters": [
+          {
+            "name": "propertyId",
+            "in": "query",
+            "required": false,
+            "description": "Narrow to one Property. A Property the caller holds no role at returns nothing, not everything.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Staff Members, oldest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/StaffMember"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1625,7 +1733,6 @@ export const OPENAPI_DOCUMENT = {
           "sessionId",
           "staffMemberId",
           "tenantId",
-          "propertyId",
           "credentialType",
           "languageTag",
           "permissions",
@@ -1649,16 +1756,22 @@ export const OPENAPI_DOCUMENT = {
           },
           "propertyId": {
             "type": "string",
-            "description": "The Property this session is scoped to right now. Changing it mints a new token (AD-3); it is never changed by a header."
+            "description": "The Property this session is scoped to right now. Changing it mints a new token (AD-3); it is never changed by a header.\n\nABSENT for a TENANT-SCOPED session, which is the same single exception to AD-3 that `POST /properties` is: FR-1 has a Jazzware operator create a Tenant and its first administrator and NO Properties, so that administrator's first session has no Property to be scoped to. They can create one; they can reach nothing Property-scoped until they do, and a Property-scoped operation answers `forbidden` naming the property picker rather than pretending. `core/src/tenancy.ts` has carried this distinction in the type system since Story 1.2 - a `TenantScope` is not assignable where a `Scope` is required."
+          },
+          "region": {
+            "type": "string",
+            "description": "The residency region of the Property this session is scoped to, and absent with `propertyId`. Stated in the session because the UX spine states it at sign-in - \"a residency fact, not a detail\" (DG-4) - and a client that has to fetch the Property to render it will render it inconsistently. Closes ADR 0002's question 6."
           },
           "credentialType": {
             "type": "string",
             "enum": [
               "sso",
+              "password",
               "pin",
-              "badge"
+              "badge",
+              "fixture"
             ],
-            "description": "What the caller signed in WITH, not what role they hold. Capability differences live here so that adding a third credential type later does not mean revisiting every permission check (Story 1.3 T2, FR-4)."
+            "description": "What the caller signed in WITH, not what role they hold. Capability differences live here so that adding a credential type later does not mean revisiting every permission check (Story 1.3 T2, FR-4): each permission declares a class, and a credential type declares which classes it may carry, so a PIN never authorises a configuration or reporting surface whatever role its holder has.\n\n`password` is the administrator fallback FR-1 makes structural - a Tenant's first administrator has no identity provider to sign in through - and it carries the holder's FULL role, unlike a PIN.\n\n`fixture` is Story 1.0's stub credential, refused unless `FIXTURE_AUTH=1` and removed by Story 1.5. It is named here rather than hidden: a session reporting `fixture` in an environment that should not have it is the cheapest possible way to notice, and a value the API can return but the schema denies is worse than an ugly one."
           },
           "languageTag": {
             "type": "string",
@@ -1688,14 +1801,24 @@ export const OPENAPI_DOCUMENT = {
         "type": "object",
         "required": [
           "id",
-          "name"
+          "name",
+          "region",
+          "active"
         ],
+        "description": "What a property picker renders. `region` is here for the same reason `Session.region` is: residency is a fact the person choosing a context should see (DG-4), and a picker that has to fetch each Property to show it will show it inconsistently.",
         "properties": {
           "id": {
             "type": "string"
           },
           "name": {
             "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean",
+            "description": "False for a deactivated Property. It STAYS in the picker on purpose: its records remain readable and only new work is refused (Story 1.2 AC-3), so removing it from the list would hide history rather than protect anything."
           }
         }
       },
@@ -1939,8 +2062,11 @@ export const OPENAPI_DOCUMENT = {
         "type": "object",
         "required": [
           "token",
-          "password"
+          "password",
+          "name",
+          "languageTag"
         ],
+        "description": "`name` and `languageTag` are REQUIRED, which is the Story 1.1 / Story 1.3 agreement the two stories were told to reach before either started.\n\nStory 1.1 records the first administrator's invitation with an email address and nothing else - a Jazzware operator has no business typing a customer's administrator's name or choosing their language - so redemption is where the person describes themselves. Making them required for EVERY redemption, rather than only the first-administrator case, keeps one code path and leaks nothing: a set-up screen that asks a new arrival their name is ordinary, and their own spelling should win over whatever the inviting administrator typed.",
         "properties": {
           "token": {
             "type": "string",
@@ -1952,6 +2078,14 @@ export const OPENAPI_DOCUMENT = {
             "writeOnly": true,
             "minLength": 12,
             "maxLength": 256
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "languageTag": {
+            "type": "string",
+            "description": "BCP 47, and one this product renders - English or Arabic in R1 (AD-12)."
           }
         }
       },
@@ -2211,6 +2345,153 @@ export const OPENAPI_DOCUMENT = {
           },
           "factorId": {
             "type": "string"
+          }
+        }
+      },
+      "Role": {
+        "type": "object",
+        "required": [
+          "key",
+          "name",
+          "isShipped",
+          "assignableAtTenantScope"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "isShipped": {
+            "type": "boolean",
+            "description": "Seeded by Story 1.1. False once Story 1.4 adds custom roles."
+          },
+          "assignableAtTenantScope": {
+            "type": "boolean",
+            "description": "Whether this role may be held across the whole Tenant rather than at one Property. True for the property administrator and the corporate viewer; false for every operational role, because a line staff role granted Tenant-wide is a privilege grant nobody asked for."
+          }
+        }
+      },
+      "RoleAssignment": {
+        "type": "object",
+        "required": [
+          "roleKey"
+        ],
+        "description": "A (Property, role) PAIR - the unit AC-1 asks for, so one Staff Member can hold different roles at different Properties in one Tenant.",
+        "properties": {
+          "propertyId": {
+            "type": "string",
+            "description": "OMITTED for a Tenant-wide grant, which only a role with `assignableAtTenantScope` accepts. Present for everything else."
+          },
+          "roleKey": {
+            "type": "string"
+          }
+        }
+      },
+      "InviteStaffMemberRequest": {
+        "type": "object",
+        "required": [
+          "name",
+          "languageTag",
+          "roles"
+        ],
+        "description": "Deliberately additionalProperties FALSE. DG-5 governs staff data, and a payroll identifier or date of birth arriving in an ignored field would be accepted-looking and unstored - so it is refused instead.",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "languageTag": {
+            "type": "string",
+            "description": "BCP 47, and it must be a language this product renders (AD-12: English and Arabic in R1). Applied at sign-in and reverted for the next person on a Shared Device (FR-61) - the handset consumes it in Story 4.6, and it is stored here because this is where the person is described."
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 320,
+            "description": "Present means a credential set-up link. ABSENT means a PIN-only account for a Shared Device - two different accounts, decided by one field."
+          },
+          "roles": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/RoleAssignment"
+            }
+          }
+        }
+      },
+      "StaffMember": {
+        "type": "object",
+        "required": [
+          "staffMemberId",
+          "tenantId",
+          "name",
+          "languageTag",
+          "roles",
+          "credentialStatus",
+          "active",
+          "createdAt"
+        ],
+        "description": "No payroll identifier, no date of birth, and no guest data (DG-5, DG-1). Neither is accepted from a caller either, so neither can appear here later by accident.",
+        "properties": {
+          "staffMemberId": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "languageTag": {
+            "type": "string"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RoleAssignment"
+            }
+          },
+          "credentialStatus": {
+            "type": "string",
+            "enum": [
+              "invited",
+              "password_set",
+              "pin_only"
+            ],
+            "description": "`invited` means the set-up link has not been redeemed yet, so this person cannot sign in. Story 1.1 leaves the first administrator in exactly that state until Story 1.3 redeems the invitation."
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "InvitedStaffMember": {
+        "type": "object",
+        "required": [
+          "staffMember"
+        ],
+        "properties": {
+          "staffMember": {
+            "$ref": "#/components/schemas/StaffMember"
+          },
+          "pin": {
+            "type": "string",
+            "description": "RETURNED ONCE AND NEVER AGAIN, and only for a PIN-only account. There is no mailbox to deliver it to, so the inviting administrator is the channel; only its hash is stored, it appears in no log, and it cannot be read back. Absent whenever an email address was given."
+          },
+          "invitationExpiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Present when an email address was given. After this the link is refused."
           }
         }
       },

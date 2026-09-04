@@ -20,6 +20,7 @@
     "gate:isolation": "vitest run tests/isolation.test.ts",
     "gate:control-plane": "vitest run tests/control-plane.test.ts",
     "test:unit": "vitest run tests/unit",
+    "test:staff": "vitest run tests/staff.test.ts",
     "smoke": "vitest run tests/smoke.test.ts",
     "gates": "npm run gate:boundaries && npm run gate:codegen-drift && npm run gate:containers && npm run gate:built-artifact && npm run gate:sla-fixtures && npm run gate:isolation && npm run gate:control-plane",
     "negative-controls": "bash scripts/negative-controls.sh",

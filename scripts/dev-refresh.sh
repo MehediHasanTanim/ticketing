@@ -91,7 +91,7 @@ fi
 # `compose up` alone does not rebuild - that is how a fixed console image once
 # went out three times without the fix in it.
 echo
-echo "== 1/4  rebuild both images =="
+echo "== 1/5  rebuild both images =="
 step docker compose build || fail "docker compose build"
 
 # ---- 2. up, with migrations applied first.
@@ -101,7 +101,7 @@ step docker compose build || fail "docker compose build"
 # is what "if applicable" means here. There is no separate migrate command to
 # remember, and no way to start the api against an un-migrated database.
 echo
-echo "== 2/4  start the cell (migrations run to completion first) =="
+echo "== 2/5  start the cell (migrations run to completion first) =="
 step docker compose up -d --wait --wait-timeout 180 ${RECREATE} \
   || fail "docker compose up (a service never became healthy)"
 
@@ -110,7 +110,7 @@ step docker compose up -d --wait --wait-timeout 180 ${RECREATE} \
 # output, so the step buffer is cleared to keep the diagnostics honest.
 : > "${STEP}"
 echo
-echo "== 3/4  verify =="
+echo "== 3/5  verify =="
 health=$(curl -fsS --max-time 10 "http://127.0.0.1:${API_PORT}/v1/health") \
   || fail "GET /v1/health (the api is up but not answering on ${API_PORT})"
 echo "   api      ${health}"
@@ -139,9 +139,48 @@ code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -X POST \
 echo "   contract POST /v1/auth/device/sign-in -> ${code} (501 until Story 4.1)"
 [ "${code}" = "501" ] || fail "an unbuilt /auth operation answered ${code}, not 501"
 
-# ---- 4. leave it running and say where it is.
+# The CONVERSE, which is the assertion that actually bites: Story 1.3 flipped six
+# flags to built, so those operations must no longer answer 501. A flag flipped
+# without a handler behind it would show up right here rather than in a review.
+code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -X POST \
+  "http://127.0.0.1:${API_PORT}/v1/auth/sign-in" \
+  -H 'content-type: application/json' -d '{"email":"nobody@example.test","password":"not-a-real-password"}')
+echo "   contract POST /v1/auth/sign-in -> ${code} (401: built, and refusing)"
+case "${code}" in
+  401|429) ;;
+  501) fail "POST /v1/auth/sign-in answered 501: the contract says Story 1.3 built it, and nothing is behind it" ;;
+  *) fail "POST /v1/auth/sign-in answered ${code}; expected 401 for an unknown address" ;;
+esac
+
+# ---- 4. the suite and the gates, against the cell that is now up.
+# REPORTED, NEVER FATAL. The point of this script is that its log closes the loop
+# without pasting terminal output back and forth, and a test result is the most
+# useful thing that log can carry. But a suite that fails for an environment
+# reason must not make "did the containers rebuild" unanswerable, so this step
+# prints its own result line and the refresh result stays what steps 1-3 decided.
+#
+# `.env` is loaded here and only here: the datastore URLs the suite needs point at
+# the PUBLISHED host ports, which is a different thing from what the containers use
+# over the compose network.
 echo
-echo "== 4/4  the cell is up =="
+echo "== 4/5  the suite and the gates =="
+test_result="skipped"
+if [ -f .env ]; then
+  set -a; . ./.env; set +a
+  if step npx vitest run; then
+    if step npm run --silent gates; then test_result="ok"; else test_result="fail (a gate went red)"; fi
+  else
+    test_result="fail (the suite went red)"
+  fi
+  : > "${STEP}"
+else
+  echo "   no .env, so the datastore URLs the suite needs are not set - skipping"
+fi
+echo "   TEST RESULT: ${test_result}"
+
+# ---- 5. leave it running and say where it is.
+echo
+echo "== 5/5  the cell is up =="
 docker compose ps --format 'table {{.Service}}\t{{.Status}}' 2>&1 | sed 's/^/   /'
 echo
 echo "   console  http://localhost:${CONSOLE_PORT}"
