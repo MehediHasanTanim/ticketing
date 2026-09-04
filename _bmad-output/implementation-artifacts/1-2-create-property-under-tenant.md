@@ -1,6 +1,6 @@
 # Story 1.2: Create a Property under a Tenant
 
-Status: ready-for-dev
+Status: review
 
 <!-- Created by bmad-create-story 2026-09-02. Story statement and acceptance criteria are transcribed verbatim from planning-artifacts/epics.md (status: final) - do not reword them here; a story needing a different criterion is a change to raise in epics.md. Epic 1: Property go-live foundation. -->
 
@@ -92,7 +92,101 @@ New: `core/property/`, `app/property/`. Cell placement is recorded in the contro
 
 ### Agent Model Used
 
-_(to be filled by the dev agent)_
+claude-opus-5 (Cowork), 2026-09-04.
+
+### Completion Notes
+
+**Built:** `POST /v1/properties`, `GET /v1/properties`, `GET /v1/properties/{id}`,
+`GET /v1/properties/{id}/setup`, `POST /v1/properties/{id}/deactivate`, and a `PATCH`
+that exists only to refuse a region change properly. All on the CELL, because the
+actor is a hotel-side tenant administrator acting on their own authority (FR-1) —
+unlike Tenant creation, which is Jazzware's.
+
+**Two structural questions the story forced, both answered rather than dodged.**
+
+*Where does the row live?* The directory row is control-plane data (AD-4) written by
+the cell role — a deliberate cross-boundary grant, visible in migration 005's grant
+list rather than implied.
+
+*How does a tenant administrator act with no Property?* Creating the first one is the
+single operation AD-3's "every request resolves to exactly one Property" cannot
+cover. Rather than make `propertyId` optional on `Scope` and weaken the type every
+cell handler relies on, **`TenantScope` is its own narrower type and `Scope` extends
+it** — so a Tenant-scoped principal is *not assignable* where a Scope is required,
+`withTenantScope` pins only the Tenant, and every cell table's RLS policy needs both
+settings and therefore returns nothing. `resolvePrincipal` still demands both.
+Negative control 28 removes that demand and the isolation gate goes red.
+
+**A cell registry, so AC-1 is true rather than aspirational.** "The Property exists
+in the chosen region's cell" needs someone to know which cell serves which region, so
+`control_plane.cells` exists and a cell **registers itself** on every deploy from
+`CELL_NAME`/`CELL_REGION`. A region no active cell serves is refused at creation with
+the available regions named — a Property whose data has nowhere to live is a problem
+discovered by whoever first tries to use it. **Cross-cell provisioning is NOT built:**
+with one cell deployed, choosing its region works and choosing any other is refused,
+which makes the multi-region gap visible instead of fudged.
+
+**Inheritance by reference, verified end to end.** `property_settings` holds a link to
+the Tenant settings *version* plus an override set; no values are copied. Proved
+against a live database: change a Tenant default → the inheriting Property sees it;
+give it an override → it stops; change the Tenant default again → the overriding
+Property does not re-inherit. That is the distinction Story 1.6 depends on and it
+cannot be expressed by a copy.
+
+**AC-2 is enforced in three places** — the aggregate, the absence of any route that
+accepts a region, and a database trigger that refuses it for *every* connection
+including admin. The `PATCH` operation is documented specifically so the direct API
+call the story asks to be tested gets **403 with residency named**, not a bare 404.
+
+**AC-3's second half is at the tenancy boundary**, not in each handler: a write scoped
+to an inactive Property is refused while reads continue. Jobs (3.1), Room Status (2.1)
+and everything after therefore inherit the rule rather than each having to remember
+it — the one that forgets is the one that matters.
+
+**AC-4's list is derived**, each step declaring a predicate over real state and naming
+the story that builds it. Today all eight are outstanding, which is the truth for a
+Property created now rather than a placeholder. Control 27 hard-codes the list and the
+test goes red.
+
+**Three things running it exposed, none of which reading would have found:**
+
+1. `jt_app` had no INSERT on `control_plane.events` — migration 004 granted it to the
+   control-plane role only, so the first creation failed with *permission denied for
+   table events*. **Migration 007**, append-only on the same terms as `cell.events`.
+2. The Story 1.0 fixture Tenants have no settings row, so a Property could not be
+   created under them — the handler's own honest refusal. **Migration 006** gives the
+   fixture what the product now requires.
+3. The region trigger refused `NULL → a cell`, which blocked backfilling the fixture
+   Properties whose `cell_name` predates the column. A trigger that cannot tell
+   *placed for the first time* from *moved to another region* makes initial placement
+   impossible.
+
+Three migrations rather than edits to 005: **"never edited after being applied"** is
+what keeps two environments from diverging, and 005 was already applied.
+
+**Also caught by verification, in my own work:** a basename collision in my file
+staging silently overwrote the API-level test with the unit test, so both slots held
+the same file. Found by comparing hashes across the two machines, which is why that
+check is worth doing every time rather than when it feels risky.
+
+**Not built, per the scope guards:** Departments, Locations and Rooms (1.7), catalog and
+SLA configuration (1.8/1.9), the Jazz Core connection (2.2). The setup list *names*
+them, as the story allows, and implements none of them. Property renaming and timezone
+or currency edits are not in this story's criteria and were not invented.
+
+### File List
+
+- `ops/migrations/005_property_lifecycle.sql`, `006_seed_fixture_tenant_settings.sql`,
+  `007_cell_appends_control_plane_events.sql`
+- `ops/migrate.ts` (cell self-registration and the placement backfill)
+- `core/src/property/create.ts`, `core/src/property/setup-steps.ts`
+- `core/src/tenancy.ts` (`TenantScope`, `assertTenantScope`)
+- `adapters/src/postgres/pool.ts` (`withTenantScope`)
+- `app/src/property/create-property.ts`
+- `edge/src/auth.ts` (`resolveTenantPrincipal`), `edge/src/server.ts`
+- `contracts/openapi.yaml` (five operations, all built)
+- `tests/property.test.ts`, `tests/unit/property.test.ts`, `tests/isolation.test.ts`
+- `scripts/negative-controls.sh` (controls 26–28)
 
 ### Debug Log References
 

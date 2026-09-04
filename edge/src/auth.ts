@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import type { Scope } from '../../core/src/tenancy';
+import type { Scope, TenantScope } from '../../core/src/tenancy';
 import { asTenantId, asPropertyId, asStaffMemberId } from '../../core/src/tenancy';
 
 /**
@@ -36,13 +36,17 @@ const secret = (): string => {
 /** Boot-time check, so `FIXTURE_AUTH=1` without a secret refuses to start. */
 export const fixtureSecretOrThrow = (): string => secret();
 
-export function mintFixtureToken(p: { tenantId: string; propertyId: string; staffMemberId: string }): string {
+export function mintFixtureToken(p: { tenantId: string; propertyId?: string; staffMemberId?: string }): string {
   const body = Buffer.from(JSON.stringify(p)).toString('base64url');
   const sig = createHmac('sha256', secret()).update(body).digest('base64url');
   return `${body}.${sig}`;
 }
 
-export function resolvePrincipal(authorization: string | undefined): Principal | undefined {
+/**
+ * Decodes and verifies, and says nothing about scope. Both resolvers below build on
+ * it so that the signature check exists once.
+ */
+function verified(authorization: string | undefined): { tenantId?: string; propertyId?: string; staffMemberId?: string } | undefined {
   if (process.env.FIXTURE_AUTH !== '1') return undefined;
   if (!authorization?.startsWith('Bearer ')) return undefined;
   const token = authorization.slice('Bearer '.length);
@@ -55,16 +59,41 @@ export function resolvePrincipal(authorization: string | undefined): Principal |
   try {
     const p = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as {
       tenantId?: string; propertyId?: string; staffMemberId?: string; aud?: string };
-    // Story 11.1 AC-2: an OPERATOR credential presented to a cell endpoint is
-    // refused. A different signing secret already makes that true, so this is belt
-    // and braces for the day someone misconfigures the two secrets to the same
-    // value - a token carrying an audience is not a cell token, whatever it says.
+    // Story 11.1 AC-2: an operator credential is refused at a cell. A different
+    // signing secret already breaks the signature; this survives the two secrets
+    // being misconfigured alike.
     if (p.aud) return undefined;
-    if (!p.tenantId || !p.propertyId) return undefined;
-    return {
-      tenantId: asTenantId(p.tenantId),
-      propertyId: asPropertyId(p.propertyId),
-      ...(p.staffMemberId ? { staffMemberId: asStaffMemberId(p.staffMemberId) } : {}),
-    };
+    return p;
   } catch { return undefined; }
+}
+
+/**
+ * TENANT-SCOPED, for the one operation that has no Property yet: creating the first
+ * one (Story 1.2). Returns a `TenantScope`, which is NOT assignable where a `Scope`
+ * is required - so this cannot be handed to `withScope` or to any Property-scoped
+ * handler, and a token carrying a Property is still fine here because a tenant
+ * administrator who happens to be scoped somewhere can still create a Property.
+ *
+ * What it must never become is a way to reach Property data without a Property: the
+ * isolation gate asserts a Tenant-scoped token reads nothing from a cell table.
+ */
+export function resolveTenantPrincipal(authorization: string | undefined): TenantScope | undefined {
+  const p = verified(authorization);
+  if (!p?.tenantId) return undefined;
+  return {
+    tenantId: asTenantId(p.tenantId),
+    ...(p.staffMemberId ? { staffMemberId: asStaffMemberId(p.staffMemberId) } : {}),
+  };
+}
+
+export function resolvePrincipal(authorization: string | undefined): Principal | undefined {
+  const p = verified(authorization);
+  // STILL DEMANDS BOTH. Story 1.2 added a Tenant-scoped path; it did not soften
+  // this one, and a token with no Property is simply not a cell principal.
+  if (!p?.tenantId || !p.propertyId) return undefined;
+  return {
+    tenantId: asTenantId(p.tenantId),
+    propertyId: asPropertyId(p.propertyId),
+    ...(p.staffMemberId ? { staffMemberId: asStaffMemberId(p.staffMemberId) } : {}),
+  };
 }

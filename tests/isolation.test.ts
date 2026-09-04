@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Client } from 'pg';
+import { mintFixtureToken } from '../edge/src/auth';
 import { start, auth, type Harness, TENANT_A, TENANT_B, PROPERTY_A, PROPERTY_B } from './harness';
 
 /**
@@ -128,6 +129,64 @@ describe('cross-tenant isolation gate', () => {
       });
       expect(res.status, path).toBe(404);
     }
+  });
+
+  it('a TENANT-scoped credential reaches no Property data at all (Story 1.2)', async () => {
+    // Story 1.2 introduced a Tenant-scoped principal for the one operation with no
+    // Property to be scoped to. This is the assertion that keeps it honest: every
+    // cell table's RLS policy requires BOTH app.tenant_id and app.property_id, so a
+    // transaction that pins only the Tenant reads nothing - and the type system
+    // refuses to hand a TenantScope to a Property-scoped handler in the first place.
+    const tenantOnly = {
+      authorization: `Bearer ${mintFixtureToken({ tenantId: TENANT_A, staffMemberId: 'admin-a' })}`,
+      'content-type': 'application/json',
+    };
+    for (const [method, path] of [
+      ['GET', '/v1/fixture-notes'],
+      ['GET', '/v1/fixture-notes/export'],
+      ['POST', '/v1/commands/record-fixture-note'],
+    ] as Array<[string, string]>) {
+      const res = await fetch(`${h.base}${path}`, {
+        method, headers: tenantOnly, ...(method === 'POST' ? { body: '{"text":"nope"}' } : {}),
+      });
+      // Not a 200 with an empty list: a token with no Property is not a cell
+      // principal, so the boundary refuses it outright.
+      expect(res.status, `${method} ${path} with a Tenant-only token`).toBe(401);
+    }
+  });
+
+  it('cross-PROPERTY: a session scoped to one Property reads nothing from another in the same Tenant', async () => {
+    // Story 1.2's testing note. Until now the gate proved cross-TENANT isolation;
+    // a second Property inside one Tenant is the case a corporate-scoped user and
+    // a multi-property estate will actually hit.
+    const created = await fetch(`${h.base}/v1/properties`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${mintFixtureToken({ tenantId: TENANT_A, staffMemberId: 'admin-a' })}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ name: 'Isolation Property A2', region: 'eu-west-1', timezone: 'Europe/London', currency: 'GBP' }),
+    });
+    expect(created.status).toBe(201);
+    const a2 = (await created.json() as { propertyId: string }).propertyId;
+
+    const inA2 = {
+      authorization: `Bearer ${mintFixtureToken({ tenantId: TENANT_A, propertyId: a2, staffMemberId: 'staff-a2' })}`,
+      'content-type': 'application/json',
+    };
+    // Write something in A2...
+    const wrote = await fetch(`${h.base}/v1/commands/record-fixture-note`, {
+      method: 'POST', headers: inA2, body: JSON.stringify({ text: 'only in A2' }),
+    });
+    expect(wrote.status).toBe(202);
+
+    // ...and Property A, same Tenant, must not see it.
+    const inA = await (await fetch(`${h.base}/v1/fixture-notes`, { headers: auth(h.tokenA) })).json() as Array<{ text: string }>;
+    expect(inA.some((n) => n.text === 'only in A2')).toBe(false);
+
+    // Nor the other way round.
+    const seenInA2 = await (await fetch(`${h.base}/v1/fixture-notes`, { headers: inA2 })).json() as Array<{ text: string }>;
+    expect(seenInA2.every((n) => n.text === 'only in A2')).toBe(true);
   });
 
   it('the event log is append-only for the application role', async () => {

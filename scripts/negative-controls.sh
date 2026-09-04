@@ -311,6 +311,45 @@ expect_red "secrets fail closed, no fallback signing key" \
 cp /tmp/opauth.nc.bak edge/src/control-plane/operator-auth.ts
 npm run --silent build >/dev/null 2>&1
 
+echo "== 26. residency: drop the trigger that refuses a region change =="
+# DG-4 is a data-residency obligation. It is enforced in three places - the
+# aggregate, the absence of any route that accepts a change, and this trigger - so
+# that no single omission moves a Property between jurisdictions.
+psql "${DATABASE_URL_ADMIN}" -q -c 'DROP TRIGGER properties_region_immutable ON control_plane.properties;' >/dev/null 2>&1
+expect_red "residency, region immutable at the database (Story 1.2 AC-2)" npx vitest run tests/property.test.ts
+psql "${DATABASE_URL_ADMIN}" -q -c 'CREATE TRIGGER properties_region_immutable BEFORE UPDATE ON control_plane.properties FOR EACH ROW EXECUTE FUNCTION control_plane.refuse_region_change();' >/dev/null 2>&1
+
+echo "== 27. setup list: hard-code it instead of deriving it =="
+# Story 1.2 T4 requires the outstanding steps "derived from what is actually missing
+# rather than a hard-coded checklist". A hard-coded list drifts the moment a step is
+# added or done, and will cheerfully tell an administrator to do something they have
+# already finished.
+cp core/src/property/setup-steps.ts /tmp/steps.nc.bak
+python3 - <<'PY2'
+import pathlib
+p = pathlib.Path('core/src/property/setup-steps.ts'); t = p.read_text()
+# Ignore the snapshot entirely - the definition of a hard-coded checklist.
+t = t.replace("    if (!step.satisfied(snapshot)) {", "    if (true) {", 1)
+p.write_text(t)
+PY2
+expect_red "setup list derived from real state (Story 1.2 T4)" npx vitest run tests/unit/property.test.ts
+cp /tmp/steps.nc.bak core/src/property/setup-steps.ts
+
+echo "== 28. Tenant scope: let a Tenant-only credential reach Property data =="
+# Story 1.2 added a Tenant-scoped principal for the one operation with no Property.
+# If `resolvePrincipal` ever stops demanding a Property, that credential becomes a
+# way into Property-scoped data with no Property predicate.
+cp edge/src/auth.ts /tmp/auth.nc.bak
+python3 - <<'PY2'
+import pathlib
+p = pathlib.Path('edge/src/auth.ts'); t = p.read_text()
+t = t.replace("  if (!p?.tenantId || !p.propertyId) return undefined;",
+              "  if (!p?.tenantId) return undefined;", 1)
+p.write_text(t)
+PY2
+expect_red "Tenant scope cannot reach Property data (Story 1.2)" npx vitest run tests/isolation.test.ts
+cp /tmp/auth.nc.bak edge/src/auth.ts
+
 echo
 echo "negative controls: ${pass} correctly went red, ${fail} did not, ${unverified} unverifiable here"
 [ "${fail}" -eq 0 ]

@@ -569,6 +569,100 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/properties": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The Properties in my Tenant.
+         * @description Only Properties within the caller's own Tenant (FR-1). The predicate is explicit in the query because control-plane tables carry no row-level security - RLS protects the cell's guest-bearing tables (AD-4).
+         */
+        get: operations["listProperties"];
+        put?: never;
+        /**
+         * Create a Property and choose its region.
+         * @description The region is the ONE IRREVERSIBLE DECISION a customer makes in this product, and it is refused later in three places rather than one: the aggregate, this document's lack of any route that accepts a change, and a database trigger that refuses it for every connection including an administrative one.
+         *
+         *     A region no active cell serves is refused HERE, with the available regions named, rather than recorded and quietly unroutable - a Property whose data has nowhere to live is a problem discovered by whoever first tries to use it.
+         *
+         *     The Property INHERITS the Tenant defaults by reference to their version, not by copying values, because a Property that later overrides a default must stop inheriting it permanently (AD-9, Story 1.6). It is created `setupIncomplete`.
+         */
+        post: operations["createProperty"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/properties/{propertyId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getProperty"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Documented in order to refuse. There is no Property update.
+         * @description AC-2 requires that a region change is refused "through any interface" with residency named as the reason, and asks for the DIRECT API CALL to be tested rather than only the absent form field. So this operation exists to answer that call properly: a body carrying a different `region` gets **403 with residency named**, not a bare 404 that leaves the caller guessing whether they used the wrong verb.
+         *
+         *     Nothing else about a Property is editable in Story 1.2 - name, timezone and currency changes are not among its criteria and are not invented here - so any other body is `not_found`. When a later story adds real editing, this operation grows a request schema; the region refusal stays.
+         */
+        patch: operations["refusePropertyRegionChange"];
+        trace?: never;
+    };
+    "/properties/{propertyId}/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What is still outstanding, in the order it must be done.
+         * @description AC-4. The list is DERIVED from what is actually missing, not read from a hard-coded checklist: each step declares a predicate over real state, so a step already done never appears and adding Story 1.7 changes the answer without changing the code.
+         *
+         *     ORDER IS THE CONTRACT. Rooms cannot be placed without Locations, an SLA Target is meaningless without a Catalog Entry to attach it to, and an Escalation chain needs someone to escalate to. Each step names the story that builds it, so an outstanding item is traceable rather than mysterious - and today every step is outstanding, because none of that work exists yet.
+         */
+        get: operations["getPropertySetupState"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/properties/{propertyId}/deactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Deactivate a Property. There is no delete.
+         * @description AC-3: deletion is prevented and only deactivation is offered, so this document has no delete operation at all. A database trigger refuses one for every connection as well, because a rule stated only in a route is a rule the next route forgets.
+         *
+         *     A deactivated Property's records STAY READABLE to authorised users and stop accepting new work: the tenancy boundary refuses writes scoped to an inactive Property while continuing to serve reads.
+         */
+        post: operations["deactivateProperty"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -817,6 +911,51 @@ export interface components {
         ResendMfaChallengeRequest: {
             challengeToken: string;
             factorId: string;
+        };
+        CreatePropertyRequest: {
+            name: string;
+            /** @description IMMUTABLE FROM THIS MOMENT. Must be a region an active cell serves, or the request is refused with the available regions named. A Property never leaves its region (DG-4, AD-4). */
+            region: string;
+            /** @description An IANA zone, checked against the runtime's own tz database rather than a list we would have to keep current. Presentation only - storage stays UTC (AD-2). */
+            timezone: string;
+            /** @description ISO-4217, shape-checked rather than matched against a closed list: a list of live codes changes without us, and rejecting a real code because ours is a year old is worse than accepting a typo that shows up in the first invoice. Money is minor-unit integers plus this code, with no conversion in v1. */
+            currency: string;
+        };
+        Property: {
+            propertyId: string;
+            tenantId: string;
+            name: string;
+            region: string;
+            /**
+             * @description Always true, and present in every representation on purpose: AC-1 requires the region to be "displayed as immutable from this point forward", and a client asked to remember that rule on its own will eventually forget it.
+             * @enum {boolean}
+             */
+            regionImmutable: true;
+            /** @description Which cell holds this Property's operational rows. The control plane is the only thing that knows (AD-4), and it cannot change - a Property never moves cell. */
+            cellName: string;
+            timezone: string;
+            currency: string;
+            /** @description False once deactivated. Records stay readable; new work is refused. */
+            active: boolean;
+            /** @description Derived from the same predicates as the outstanding list rather than maintained beside them - two sources of truth for "is setup done" is how a Property ends up marked complete with steps outstanding. */
+            setupIncomplete: boolean;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        PropertySetupState: {
+            property: components["schemas"]["Property"];
+            /** @description In the order the work must be done. Empty means setup is complete. */
+            outstanding: components["schemas"]["SetupStep"][];
+            complete: boolean;
+        };
+        SetupStep: {
+            key: string;
+            /** @description Shown to a property administrator. */
+            title: string;
+            /** @description The story that builds this step, so an outstanding item is traceable rather than mysterious. Today every step names a story that has not landed, which is why every step is outstanding. */
+            story: string;
+            /** @description 1-based */
+            position: number;
         };
     };
     responses: {
@@ -1566,6 +1705,173 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             501: components["responses"]["NotImplemented"];
+        };
+    };
+    listProperties: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description the Tenant's Properties, oldest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Property"][];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    createProperty: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePropertyRequest"];
+            };
+        };
+        responses: {
+            /** @description the Property */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Property"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            /** @description the Tenant is deactivated */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getProperty: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                propertyId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description the Property */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Property"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    refusePropertyRegionChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description Send it and be refused. It exists in this schema so the refusal is documented rather than incidental. */
+                    region?: string;
+                };
+            };
+        };
+        responses: {
+            401: components["responses"]["Error"];
+            /** @description A region change was attempted. `code` is `forbidden` and `details.reason` names residency. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    getPropertySetupState: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                propertyId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description the Property and its outstanding steps */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PropertySetupState"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    deactivateProperty: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                propertyId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description the Property, now inactive */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Property"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            /** @description already deactivated */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
         };
     };
 }

@@ -7,10 +7,16 @@ import { handleRecordFixtureNote } from '../../app/src/record-fixture-note';
 import { systemClock } from '../../app/src/clock';
 import { foldSla } from '../../core/src/job';
 import { ValidationError } from '../../core/src/fixture/note';
-import { resolvePrincipal, type Principal } from './auth';
+import { resolvePrincipal, resolveTenantPrincipal, type Principal } from './auth';
 import { docsEnabled, serveDocsAsset, serveDocsPage, serveOpenApiDocument } from './docs';
 import { unimplementedStory } from './not-implemented';
 import { handleControlPlane, isControlPlanePath } from './control-plane/router';
+import { withTenantScope } from '../../adapters/src/postgres/pool';
+import {
+  handleCreateProperty, listProperties, propertySetupState, handleDeactivateProperty,
+  assertPropertyRegionUnchanged, NotFound as PropertyNotFound,
+  ConflictError as PropertyConflict, RegionImmutable,
+} from '../../app/src/property/create-property';
 import { envelope, statusFor, type ErrorCode } from './errors';
 
 /**
@@ -80,6 +86,31 @@ const routes: Array<{ method: string; path: RegExp; handler: Handler }> = [
       json(res, 200, foldSla({ events: b.events, targetMinutes: b.targetMinutes, now: b.now }));
     } },
 ];
+
+/**
+ * Is this Property still accepting writes? A directory read, not a scoped one:
+ * `control_plane.properties` carries no row-level security (AD-4), so the Tenant
+ * and Property are named explicitly in the predicate.
+ *
+ * A Property with no directory row is treated as ACCEPTING - the Story 1.0 fixture
+ * scopes predate the directory, and failing closed here would refuse every write in
+ * the isolation gate for a reason that has nothing to do with deactivation. The
+ * boundary that matters for an unknown Property is row-level security, which
+ * returns nothing for a scope that owns nothing.
+ */
+async function propertyAcceptsWrites(principal: Principal): Promise<boolean> {
+  try {
+    const res = await getPool().query<{ active: boolean }>(
+      'SELECT active FROM control_plane.properties WHERE id = $1 AND tenant_id = $2',
+      [principal.propertyId, principal.tenantId]);
+    const row = res.rows[0];
+    return row ? row.active : true;
+  } catch {
+    // A directory that cannot be read is a datastore problem, not a deactivation.
+    // Health reports it; this must not turn it into a puzzling 403.
+    return true;
+  }
+}
 
 export function createApp(): Server {
   return createServer(async (req, res) => {
@@ -158,14 +189,90 @@ export function createApp(): Server {
       const story = unimplementedStory(req, url.pathname);
       if (story) return fail(res, 'not_implemented', { story });
 
+      // ---- Tenant-scoped routes (Story 1.2) ----
+      // Creating the first Property is the one operation with no Property to be
+      // scoped to, so it resolves a TENANT principal. That type is not assignable
+      // where a Scope is required, and `withTenantScope` pins only the Tenant - so
+      // every cell table's RLS policy, which needs both settings, returns nothing
+      // inside these transactions. The isolation gate asserts exactly that.
+      if (url.pathname === '/v1/properties' || /^\/v1\/properties\/[^/]+(\/[a-z-]+)?$/.test(url.pathname)) {
+        const tenant = resolveTenantPrincipal(req.headers.authorization);
+        if (!tenant) return fail(res, 'unauthenticated');
+
+        if (req.method === 'POST' && url.pathname === '/v1/properties') {
+          const b = (await readBody(req)) as Record<string, unknown>;
+          // AC-2, for the caller who sends a region to a creation call it does not
+          // belong on... it does belong here, at creation. The refusal that names
+          // residency is on the UPDATE paths below.
+          const out = await withTenantScope(tenant, (client) => handleCreateProperty(
+            client, tenant,
+            {
+              name: String(b.name ?? ''), region: String(b.region ?? ''),
+              timezone: String(b.timezone ?? ''), currency: String(b.currency ?? ''),
+            }, new Date()));
+          return json(res, 201, out);
+        }
+
+        if (readMethod && url.pathname === '/v1/properties') {
+          return json(res, 200, await withTenantScope(tenant, (c) => listProperties(c, tenant.tenantId)));
+        }
+
+        const setup = /^\/v1\/properties\/([^/]+)\/setup$/.exec(url.pathname);
+        if (readMethod && setup) {
+          return json(res, 200, await withTenantScope(tenant, (c) =>
+            propertySetupState(c, tenant.tenantId, decodeURIComponent(setup[1] ?? ''))));
+        }
+
+        const deactivate = /^\/v1\/properties\/([^/]+)\/deactivate$/.exec(url.pathname);
+        if (req.method === 'POST' && deactivate) {
+          return json(res, 200, await withTenantScope(tenant, (c) => handleDeactivateProperty(
+            c, tenant, decodeURIComponent(deactivate[1] ?? ''), new Date())));
+        }
+
+        // AC-2: there is no route that changes a region, and an attempt to reach
+        // one must say WHY rather than answer a bare 404. This is the "direct API
+        // call, not only the absent form field" the story asks to be tested.
+        const one = /^\/v1\/properties\/([^/]+)$/.exec(url.pathname);
+        if (one && (req.method === 'PATCH' || req.method === 'PUT')) {
+          const b = (await readBody(req)) as { region?: string };
+          await withTenantScope(tenant, (c) => assertPropertyRegionUnchanged(
+            c, tenant.tenantId, decodeURIComponent(one[1] ?? ''), b.region));
+          // Nothing else about a Property is editable in this story: name, timezone
+          // and currency changes are not in its criteria, so they are not invented
+          // here.
+          return fail(res, 'not_found');
+        }
+        if (readMethod && one) {
+          const list = await withTenantScope(tenant, (c) => listProperties(c, tenant.tenantId));
+          const found = list.find((x) => x.propertyId === decodeURIComponent(one[1] ?? ''));
+          if (!found) return fail(res, 'not_found');
+          return json(res, 200, found);
+        }
+        return fail(res, 'not_found');
+      }
+
       // ---- tenancy resolution: the one boundary (AD-3) ----
       const principal = resolvePrincipal(req.headers.authorization);
       if (!principal) return fail(res, 'unauthenticated');
+
+      // AC-3: a deactivated Property STOPS ACCEPTING NEW WORK while its records
+      // STAY READABLE. Enforced here rather than in each handler, because Jobs
+      // (3.1), Room Status (2.1) and everything after them would each have to
+      // remember - and the one that forgets is the one that matters. Reads are
+      // deliberately unaffected.
+      if (!readMethod && !(await propertyAcceptsWrites(principal))) {
+        return fail(res, 'forbidden', {
+          reason: 'this Property is deactivated: its records remain readable, and it accepts no new work (Story 1.2 AC-3)',
+        });
+      }
 
       const route = routes.find((r) => r.method === req.method && r.path.test(url.pathname));
       if (!route) return fail(res, 'not_found');
       await route.handler(req, res, { principal, url });
     } catch (err) {
+      if (err instanceof RegionImmutable) return fail(res, 'forbidden', { reason: err.message });
+      if (err instanceof PropertyConflict) return fail(res, 'conflict', { reason: err.message });
+      if (err instanceof PropertyNotFound) return fail(res, 'not_found');
       if (err instanceof ValidationError) return fail(res, 'validation_failed', { reason: err.message });
       console.error('[edge] unhandled', err);
       if (!res.headersSent) fail(res, 'internal');

@@ -52,6 +52,7 @@ async function main(): Promise<void> {
     // DELIBERATE SCOPE NOTE: seeding belongs to Story 11.2, but Story 11.1's
     // sign-in cannot be exercised without an account to sign in as. Only the seed
     // is taken early; the operator-account management endpoints remain 11.2's.
+    await registerThisCell(client);
     await seedBootstrapOperator(client);
 
     const appPassword = process.env.APP_DB_PASSWORD;
@@ -85,6 +86,52 @@ async function main(): Promise<void> {
   } finally {
     await client.end();
   }
+}
+
+/**
+ * A cell registers ITSELF on every deploy (Story 1.2). The control plane is the
+ * only thing that knows which cell serves which region (AD-4), and a hand-kept list
+ * of cells is a list that is wrong the first time one is added.
+ *
+ * Region comes from CELL_REGION when set. Otherwise it is derived from CELL_NAME by
+ * dropping the first segment - `local-eu-west-1` becomes `eu-west-1` - which is a
+ * convention, not a guarantee, so it is stated in the log rather than assumed
+ * silently.
+ */
+async function registerThisCell(client: Client): Promise<void> {
+  const name = process.env.CELL_NAME;
+  if (!name) { console.log('CELL_NAME not set - this cell cannot register itself'); return; }
+  const region = process.env.CELL_REGION ?? name.split('-').slice(1).join('-');
+  if (!region) { console.log(`cannot derive a region from CELL_NAME=${name} - set CELL_REGION`); return; }
+
+  await client.query(
+    `INSERT INTO control_plane.cells (name, region, active) VALUES ($1, $2, true)
+       ON CONFLICT (name) DO UPDATE SET region = EXCLUDED.region, active = true`,
+    [name, region]);
+  console.log(`cell ${name} registered as serving region ${region}`
+    + (process.env.CELL_REGION ? '' : ' (derived from CELL_NAME; set CELL_REGION to be explicit)'));
+
+  // Place any directory row that predates the cell registry - the Story 1.0
+  // fixture Properties, whose cell_name is NULL because the column arrived after
+  // them. Only unplaced rows, and only within this cell's own region: the trigger
+  // refuses a move, and this must never look like one.
+  const placed = await client.query(
+    `UPDATE control_plane.properties SET cell_name = $1
+      WHERE cell_name IS NULL AND region = $2`, [name, region]);
+  if (placed.rowCount) console.log(`placed ${placed.rowCount} previously unplaced Propert${placed.rowCount === 1 ? 'y' : 'ies'} in ${name}`);
+
+  // And give them the settings link Story 1.2 creates for new Properties, so the
+  // inheritance rule has no exceptions. Fixture Tenants have a settings row only if
+  // Story 1.1 provisioned them, so this skips any Tenant that has none.
+  const linked = await client.query(
+    `INSERT INTO control_plane.property_settings (tenant_id, property_id, inherits_version)
+     SELECT p.tenant_id, p.id, ts.version
+       FROM control_plane.properties p
+       JOIN control_plane.tenant_settings ts ON ts.tenant_id = p.tenant_id
+      WHERE NOT EXISTS (
+        SELECT 1 FROM control_plane.property_settings ps
+         WHERE ps.tenant_id = p.tenant_id AND ps.property_id = p.id)`);
+  if (linked.rowCount) console.log(`linked ${linked.rowCount} Propert${linked.rowCount === 1 ? 'y' : 'ies'} to their Tenant settings version`);
 }
 
 /**

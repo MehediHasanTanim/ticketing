@@ -26,6 +26,11 @@ tags:
     description: >-
       Authentication and session. Designed here in full and built across four
       stories - see the ownership note above the /auth paths.
+  - name: properties
+    description: >-
+      Properties, created by a tenant administrator on their own authority (FR-1).
+      The only TENANT-scoped operations here: creating the first Property has no
+      Property to be scoped to, which is the one thing AD-3 cannot cover.
   - name: isolation-fixture
     description: >-
       Story 1.0's cross-tenant isolation fixture. NOT a domain aggregate and not a
@@ -841,6 +846,202 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "501": { $ref: "#/components/responses/NotImplemented" }
+  # ---- Properties (Story 1.2, FR-1) ----
+  # TENANT-SCOPED, not Property-scoped, and the only operations in this document
+  # that are. Creating the first Property is the one thing AD-3's "every request
+  # resolves to exactly one Tenant and Property" cannot cover, because there is no
+  # Property yet. The credential therefore carries a Tenant and may carry no
+  # Property - and a token like that is refused by every other route here, because
+  # `resolvePrincipal` still demands both.
+  #
+  # These are on the CELL and not the internal surface: the actor is a hotel-side
+  # tenant administrator acting on their own authority (FR-1), unlike Tenant
+  # creation, which is Jazzware's.
+  #
+  # THERE IS NO OPERATION THAT CHANGES A REGION, anywhere, ever. That absence is
+  # the feature (DG-4, AD-4) - see the note on PATCH below.
+  /properties:
+    post:
+      operationId: createProperty
+      tags: [properties]
+      x-story: "1.2"
+      summary: Create a Property and choose its region.
+      description: >-
+        The region is the ONE IRREVERSIBLE DECISION a customer makes in this
+        product, and it is refused later in three places rather than one: the
+        aggregate, this document's lack of any route that accepts a change, and a
+        database trigger that refuses it for every connection including an
+        administrative one.
+
+
+        A region no active cell serves is refused HERE, with the available regions
+        named, rather than recorded and quietly unroutable - a Property whose data
+        has nowhere to live is a problem discovered by whoever first tries to use
+        it.
+
+
+        The Property INHERITS the Tenant defaults by reference to their version, not
+        by copying values, because a Property that later overrides a default must
+        stop inheriting it permanently (AD-9, Story 1.6). It is created
+        `setupIncomplete`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreatePropertyRequest" }
+      responses:
+        "201":
+          description: the Property
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Property" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409":
+          description: the Tenant is deactivated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    get:
+      operationId: listProperties
+      tags: [properties]
+      x-story: "1.2"
+      summary: The Properties in my Tenant.
+      description: >-
+        Only Properties within the caller's own Tenant (FR-1). The predicate is
+        explicit in the query because control-plane tables carry no row-level
+        security - RLS protects the cell's guest-bearing tables (AD-4).
+      responses:
+        "200":
+          description: the Tenant's Properties, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Property" }
+        "401": { $ref: "#/components/responses/Error" }
+  /properties/{propertyId}:
+    get:
+      operationId: getProperty
+      tags: [properties]
+      x-story: "1.2"
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: the Property
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Property" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: refusePropertyRegionChange
+      tags: [properties]
+      x-story: "1.2"
+      summary: Documented in order to refuse. There is no Property update.
+      description: >-
+        AC-2 requires that a region change is refused "through any interface" with
+        residency named as the reason, and asks for the DIRECT API CALL to be tested
+        rather than only the absent form field. So this operation exists to answer
+        that call properly: a body carrying a different `region` gets **403 with
+        residency named**, not a bare 404 that leaves the caller guessing whether
+        they used the wrong verb.
+
+
+        Nothing else about a Property is editable in Story 1.2 - name, timezone and
+        currency changes are not among its criteria and are not invented here - so
+        any other body is `not_found`. When a later story adds real editing, this
+        operation grows a request schema; the region refusal stays.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                region:
+                  type: string
+                  description: Send it and be refused. It exists in this schema so the refusal is documented rather than incidental.
+      responses:
+        "403":
+          description: >-
+            A region change was attempted. `code` is `forbidden` and
+            `details.reason` names residency.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /properties/{propertyId}/setup:
+    get:
+      operationId: getPropertySetupState
+      tags: [properties]
+      x-story: "1.2"
+      summary: What is still outstanding, in the order it must be done.
+      description: >-
+        AC-4. The list is DERIVED from what is actually missing, not read from a
+        hard-coded checklist: each step declares a predicate over real state, so a
+        step already done never appears and adding Story 1.7 changes the answer
+        without changing the code.
+
+
+        ORDER IS THE CONTRACT. Rooms cannot be placed without Locations, an SLA
+        Target is meaningless without a Catalog Entry to attach it to, and an
+        Escalation chain needs someone to escalate to. Each step names the story
+        that builds it, so an outstanding item is traceable rather than mysterious -
+        and today every step is outstanding, because none of that work exists yet.
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: the Property and its outstanding steps
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PropertySetupState" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /properties/{propertyId}/deactivate:
+    post:
+      operationId: deactivateProperty
+      tags: [properties]
+      x-story: "1.2"
+      summary: Deactivate a Property. There is no delete.
+      description: >-
+        AC-3: deletion is prevented and only deactivation is offered, so this
+        document has no delete operation at all. A database trigger refuses one for
+        every connection as well, because a rule stated only in a route is a rule
+        the next route forgets.
+
+
+        A deactivated Property's records STAY READABLE to authorised users and stop
+        accepting new work: the tenancy boundary refuses writes scoped to an
+        inactive Property while continuing to serve reads.
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: the Property, now inactive
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Property" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409":
+          description: already deactivated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
 components:
   securitySchemes:
     bearerAuth:
@@ -1250,3 +1451,88 @@ components:
       properties:
         challengeToken: { type: string, writeOnly: true }
         factorId: { type: string }
+    CreatePropertyRequest:
+      type: object
+      required: [name, region, timezone, currency]
+      properties:
+        name: { type: string, maxLength: 200 }
+        region:
+          type: string
+          description: >-
+            IMMUTABLE FROM THIS MOMENT. Must be a region an active cell serves, or
+            the request is refused with the available regions named. A Property
+            never leaves its region (DG-4, AD-4).
+        timezone:
+          type: string
+          description: >-
+            An IANA zone, checked against the runtime's own tz database rather than
+            a list we would have to keep current. Presentation only - storage stays
+            UTC (AD-2).
+        currency:
+          type: string
+          pattern: "^[A-Z]{3}$"
+          description: >-
+            ISO-4217, shape-checked rather than matched against a closed list: a
+            list of live codes changes without us, and rejecting a real code because
+            ours is a year old is worse than accepting a typo that shows up in the
+            first invoice. Money is minor-unit integers plus this code, with no
+            conversion in v1.
+    Property:
+      type: object
+      required:
+        [propertyId, tenantId, name, region, regionImmutable, cellName, timezone,
+         currency, active, setupIncomplete, createdAt]
+      properties:
+        propertyId: { type: string }
+        tenantId: { type: string }
+        name: { type: string }
+        region: { type: string }
+        regionImmutable:
+          type: boolean
+          enum: [true]
+          description: >-
+            Always true, and present in every representation on purpose: AC-1
+            requires the region to be "displayed as immutable from this point
+            forward", and a client asked to remember that rule on its own will
+            eventually forget it.
+        cellName:
+          type: string
+          description: >-
+            Which cell holds this Property's operational rows. The control plane is
+            the only thing that knows (AD-4), and it cannot change - a Property
+            never moves cell.
+        timezone: { type: string }
+        currency: { type: string }
+        active:
+          type: boolean
+          description: False once deactivated. Records stay readable; new work is refused.
+        setupIncomplete:
+          type: boolean
+          description: >-
+            Derived from the same predicates as the outstanding list rather than
+            maintained beside them - two sources of truth for "is setup done" is how
+            a Property ends up marked complete with steps outstanding.
+        createdAt: { type: string, format: date-time }
+    PropertySetupState:
+      type: object
+      required: [property, outstanding, complete]
+      properties:
+        property: { $ref: "#/components/schemas/Property" }
+        outstanding:
+          type: array
+          description: In the order the work must be done. Empty means setup is complete.
+          items: { $ref: "#/components/schemas/SetupStep" }
+        complete: { type: boolean }
+    SetupStep:
+      type: object
+      required: [key, title, story, position]
+      properties:
+        key: { type: string }
+        title: { type: string, description: Shown to a property administrator. }
+        story:
+          type: string
+          description: >-
+            The story that builds this step, so an outstanding item is traceable
+            rather than mysterious. Today every step names a story that has not
+            landed, which is why every step is outstanding.
+        position: { type: integer, minimum: 1, description: 1-based, so a caller can render "3 of 8" without recounting. }
