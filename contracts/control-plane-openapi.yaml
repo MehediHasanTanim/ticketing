@@ -49,7 +49,6 @@ paths:
       operationId: operatorSignIn
       tags: [operator-auth]
       x-story: "11.1"
-      x-implemented: false
       security: []          # this is where an operator credential is obtained
       summary: Sign in as a Jazzware operator.
       description: >-
@@ -85,7 +84,6 @@ paths:
       operationId: getOperatorSession
       tags: [operator-auth]
       x-story: "11.1"
-      x-implemented: false
       summary: Who this operator is, and what the session may do.
       description: >-
         The operator counterpart of the cell's `/auth/session`, and deliberately a
@@ -104,7 +102,6 @@ paths:
       operationId: operatorSignOut
       tags: [operator-auth]
       x-story: "11.1"
-      x-implemented: false
       summary: End this operator session.
       responses:
         "204":
@@ -231,7 +228,6 @@ paths:
       operationId: createTenant
       tags: [provisioning]
       x-story: "1.1"
-      x-implemented: false
       summary: Create a Tenant and its first administrator.
       description: >-
         Owned by Story 1.1, which specifies the behaviour; it appears in THIS
@@ -261,12 +257,42 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "501": { $ref: "#/components/responses/NotImplemented" }
+  /tenants/{tenantId}/deactivate:
+    post:
+      operationId: deactivateTenant
+      tags: [provisioning]
+      x-story: "1.1"
+      summary: Deactivate a Tenant. There is no delete.
+      description: >-
+        Story 1.1 AC-4: a Tenant with operational records is DEACTIVATED, NEVER
+        DELETED, so this document offers no delete operation at all — the absence is
+        the feature. The database refuses as well: DELETE is revoked from the
+        provisioning role and a trigger raises on it, because a rule stated only in a
+        route is a rule the next route can forget.
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: the Tenant, now inactive
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Tenant" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409":
+          description: already deactivated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
   /tenants/{tenantId}/support-access:
     post:
       operationId: requestSupportAccess
       tags: [provisioning]
       x-story: "1.1"
-      x-implemented: false
       summary: Request time-boxed access to a Tenant's data.
       description: >-
         The ONLY route by which Jazzware reaches customer data, and it is a request
@@ -398,6 +424,12 @@ components:
             Nothing in this list reads customer data.
           items: { type: string }
         expiresAt: { type: string, format: date-time }
+        mustChangeCredential:
+          type: boolean
+          description: >-
+            True for the deployment-seeded bootstrap account (Story 11.2 AC-2).
+            Story 11.1 surfaces it; Story 11.2 builds the change endpoint and
+            enforces it.
     OperatorAccount:
       type: object
       required: [operatorId, email, displayName, scopes, active, createdAt]
@@ -443,7 +475,7 @@ components:
         details: { type: object, additionalProperties: true }
     CreateTenantRequest:
       type: object
-      required: [name, firstAdministratorEmail, region]
+      required: [name, firstAdministratorEmail]
       properties:
         name: { type: string, maxLength: 200 }
         firstAdministratorEmail:
@@ -452,21 +484,29 @@ components:
           description: >-
             Receives an invitation granting tenant-administrator scope ONLY, redeemed
             in the cell at `/auth/credential/set-up`.
-        region:
-          type: string
-          description: >-
-            Chosen at creation and IMMUTABLE thereafter — a Property never leaves its
-            region (AD-4, DG-4), and the region is stated at sign-in because it is a
-            residency fact.
+        # NO `region` HERE, deliberately — and this replaced a defect: the first
+        # draft of this document required one. FR-83 is explicit that "region is
+        # chosen at Property creation and immutable thereafter" (DG-4), and FR-1
+        # says provisioning creates no Properties, so at this moment a Tenant has
+        # no region at all. Asking for one would have made every caller invent an
+        # answer that Story 1.2 then has to reconcile.
     Tenant:
       type: object
-      required: [tenantId, name, region, active, createdAt]
+      required: [tenantId, name, active, createdAt]
       properties:
         tenantId: { type: string }
         name: { type: string }
-        region: { type: string }
         active: { type: boolean, description: A Tenant with operational records can be deactivated, never deleted (FR-1). }
         createdAt: { type: string, format: date-time }
+        invitationId:
+          type: string
+          description: >-
+            The first administrator's invitation. THE TOKEN IS NOT HERE and never
+            reaches an operator: returning it would hand Jazzware a way into the
+            customer's first administrator account, which is exactly what FR-1's "no
+            standing access" forbids. Only its hash is stored, and the token itself
+            goes to a delivery outbox the operator role can write to and cannot read.
+        invitationExpiresAt: { type: string, format: date-time }
     SupportAccessRequest:
       type: object
       required: [reason, requestedMinutes]

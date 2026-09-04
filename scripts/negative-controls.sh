@@ -228,6 +228,42 @@ expect_red "surface separation, one scheme for both surfaces" node scripts/gate-
 cp /tmp/control.sep.bak contracts/control-plane-openapi.yaml
 npm run --silent codegen >/dev/null 2>&1
 
+echo "== 20. privilege boundary: let the control-plane role reach the cell =="
+# Story 11.1 AC-1 - an operator session grants NO read of tenant data - is enforced
+# by `jt_control` having no grants in the cell schema. If a well-meaning future
+# migration grants one, this is what says so.
+psql "${DATABASE_URL_ADMIN}" -q -c 'GRANT USAGE ON SCHEMA cell TO jt_control; GRANT SELECT ON cell.events TO jt_control;' >/dev/null 2>&1
+expect_red "privilege boundary, control-plane role reaching the cell" npx vitest run tests/provisioning.test.ts
+psql "${DATABASE_URL_ADMIN}" -q -c 'REVOKE SELECT ON cell.events FROM jt_control; REVOKE USAGE ON SCHEMA cell FROM jt_control;' >/dev/null 2>&1
+
+echo "== 21. privilege boundary: let the operator read back the invitation token =="
+# The outbox is INSERT-only for `jt_control` so that provisioning cannot be turned
+# into a way into the customer's first administrator account (FR-1).
+psql "${DATABASE_URL_ADMIN}" -q -c 'GRANT SELECT ON control_plane.outbox TO jt_control;' >/dev/null 2>&1
+expect_red "privilege boundary, operator reading the invitation token" npx vitest run tests/provisioning.test.ts
+psql "${DATABASE_URL_ADMIN}" -q -c 'REVOKE SELECT ON control_plane.outbox FROM jt_control;' >/dev/null 2>&1
+
+echo "== 22. deactivate-never-delete: drop the trigger that refuses a Tenant delete =="
+psql "${DATABASE_URL_ADMIN}" -q -c 'DROP TRIGGER tenants_no_delete ON control_plane.tenants;' >/dev/null 2>&1
+expect_red "deactivate never delete (Story 1.1 AC-4)" npx vitest run tests/provisioning.test.ts
+psql "${DATABASE_URL_ADMIN}" -q -c 'CREATE TRIGGER tenants_no_delete BEFORE DELETE ON control_plane.tenants FOR EACH ROW EXECUTE FUNCTION control_plane.refuse_tenant_delete();' >/dev/null 2>&1
+
+echo "== 23. cross-surface tokens: make the two surfaces share one secret =="
+# The audience check is what survives this. If it is ever removed, an operator
+# token becomes a cell token the moment someone misconfigures the secrets alike.
+expect_red "cross-surface tokens, shared secret defeated by the audience check" \
+  env CONTROL_PLANE_TOKEN_SECRET="${FIXTURE_AUTH_SECRET:-story-1-0-fixture-secret}" \
+  node -e '
+    const { mintOperatorToken } = require("./dist/edge/src/control-plane/operator-auth.js");
+    const { resolvePrincipal } = require("./dist/edge/src/auth.js");
+    process.env.FIXTURE_AUTH = "1";
+    const t = mintOperatorToken({ operatorId: "01O-x", sessionId: "01S-x", expiresAt: new Date(Date.now() + 60000) });
+    // With the secrets identical the signature verifies, so ONLY the audience
+    // check can refuse it. If this resolves, the cell has accepted an operator.
+    if (resolvePrincipal("Bearer " + t)) { console.error("the cell accepted an operator token"); process.exit(0); }
+    process.exit(1);
+  '
+
 echo
 echo "negative controls: ${pass} correctly went red, ${fail} did not, ${unverified} unverifiable here"
 [ "${fail}" -eq 0 ]

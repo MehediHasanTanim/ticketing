@@ -10,6 +10,7 @@ import { ValidationError } from '../../core/src/fixture/note';
 import { resolvePrincipal, type Principal } from './auth';
 import { docsEnabled, serveDocsAsset, serveDocsPage, serveOpenApiDocument } from './docs';
 import { unimplementedStory } from './not-implemented';
+import { handleControlPlane, isControlPlanePath } from './control-plane/router';
 import { envelope, statusFor, type ErrorCode } from './errors';
 
 /**
@@ -136,6 +137,17 @@ export function createApp(): Server {
         // authenticated routes and getting a misleading 401.
         const asset = /^\/v1\/docs\/assets\/(.*)$/.exec(url.pathname);
         if (asset) return serveDocsAsset(decodeURIComponent(asset[1] ?? ''), req, res);
+      }
+
+      // ---- the Jazzware-internal surface (Stories 11.1, 1.1) ----
+      // A routing namespace, per Story 1.1's structure notes ("no separate
+      // deployable"). It is answered BEFORE the cell's tenancy resolution because
+      // an operator token is not a cell credential and must never be resolved as
+      // one - and the cell's own routes never see a /control/v1 path, so neither
+      // surface is reachable by guessing at the other's prefix. The deployment
+      // question is raised in the router's own comment.
+      if (isControlPlanePath(url.pathname)) {
+        if (await handleControlPlane(req, res, url, new Date())) return;
       }
 
       // ---- documented, not built yet ----

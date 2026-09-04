@@ -48,7 +48,6 @@ export const CONTROL_PLANE_OPENAPI_DOCUMENT = {
           "operator-auth"
         ],
         "x-story": "11.1",
-        "x-implemented": false,
         "security": [],
         "summary": "Sign in as a Jazzware operator.",
         "description": "Yields a session scoped to provisioning actions only. It grants NO read of any Tenant's operational or guest data — not reduced access, none — and the refusal is server-side against a crafted payload rather than an interface that hides things (Story 11.1 AC-1, AD-11).\n\nA hotel-side identity presented here is refused, and the response reveals nothing about whether that identity exists. Second factors follow FR-84 and FR-85 exactly as for a tenant user: off by default, the operator's own to enable, and available to be required across the operator organisation by the same enforcement setting. Jazzware's security policy decides whether to switch it on; this contract does not decide it for them.",
@@ -95,7 +94,6 @@ export const CONTROL_PLANE_OPENAPI_DOCUMENT = {
           "operator-auth"
         ],
         "x-story": "11.1",
-        "x-implemented": false,
         "summary": "Who this operator is, and what the session may do.",
         "description": "The operator counterpart of the cell's `/auth/session`, and deliberately a much smaller thing: provisioning scope, no Tenant, no Property, no guest data of any kind (AD-4, DG-1).",
         "responses": {
@@ -125,7 +123,6 @@ export const CONTROL_PLANE_OPENAPI_DOCUMENT = {
           "operator-auth"
         ],
         "x-story": "11.1",
-        "x-implemented": false,
         "summary": "End this operator session.",
         "responses": {
           "204": {
@@ -326,7 +323,6 @@ export const CONTROL_PLANE_OPENAPI_DOCUMENT = {
           "provisioning"
         ],
         "x-story": "1.1",
-        "x-implemented": false,
         "summary": "Create a Tenant and its first administrator.",
         "description": "Owned by Story 1.1, which specifies the behaviour; it appears in THIS document rather than the cell's because the surface is internal (FR-1). No hotel-side role can reach it, including a tenant administrator, and the product presents no link to it.\n\nSeeds the shipped role set and platform defaults, and creates **no Properties and no identity connection** — those are the customer's to configure. The first administrator receives an invitation granting tenant-administrator scope only, redeemed in the CELL at `/auth/credential/set-up` (Story 1.3), so the two stories must agree the token's shape.",
         "requestBody": {
@@ -368,6 +364,58 @@ export const CONTROL_PLANE_OPENAPI_DOCUMENT = {
         }
       }
     },
+    "/tenants/{tenantId}/deactivate": {
+      "post": {
+        "operationId": "deactivateTenant",
+        "tags": [
+          "provisioning"
+        ],
+        "x-story": "1.1",
+        "summary": "Deactivate a Tenant. There is no delete.",
+        "description": "Story 1.1 AC-4: a Tenant with operational records is DEACTIVATED, NEVER DELETED, so this document offers no delete operation at all — the absence is the feature. The database refuses as well: DELETE is revoked from the provisioning role and a trigger raises on it, because a rule stated only in a route is a rule the next route can forget.",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the Tenant, now inactive",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Tenant"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "already deactivated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/tenants/{tenantId}/support-access": {
       "post": {
         "operationId": "requestSupportAccess",
@@ -375,7 +423,6 @@ export const CONTROL_PLANE_OPENAPI_DOCUMENT = {
           "provisioning"
         ],
         "x-story": "1.1",
-        "x-implemented": false,
         "summary": "Request time-boxed access to a Tenant's data.",
         "description": "The ONLY route by which Jazzware reaches customer data, and it is a request rather than a capability: separately requested, time-boxed, and recorded in that Tenant's OWN audit trail as well as the operator trail (FR-1, Story 1.1 AC-3, Story 11.3 AC-3). A grant visible only to Jazzware is exactly the failure FR-1 exists to prevent.\n\nReturns 202: the request is recorded, and the grant becomes effective under the approval rules Story 1.1 specifies rather than because it was asked for.",
         "parameters": [
@@ -596,6 +643,10 @@ export const CONTROL_PLANE_OPENAPI_DOCUMENT = {
           "expiresAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "mustChangeCredential": {
+            "type": "boolean",
+            "description": "True for the deployment-seeded bootstrap account (Story 11.2 AC-2). Story 11.1 surfaces it; Story 11.2 builds the change endpoint and enforces it."
           }
         }
       },
@@ -708,8 +759,7 @@ export const CONTROL_PLANE_OPENAPI_DOCUMENT = {
         "type": "object",
         "required": [
           "name",
-          "firstAdministratorEmail",
-          "region"
+          "firstAdministratorEmail"
         ],
         "properties": {
           "name": {
@@ -720,10 +770,6 @@ export const CONTROL_PLANE_OPENAPI_DOCUMENT = {
             "type": "string",
             "format": "email",
             "description": "Receives an invitation granting tenant-administrator scope ONLY, redeemed in the cell at `/auth/credential/set-up`."
-          },
-          "region": {
-            "type": "string",
-            "description": "Chosen at creation and IMMUTABLE thereafter — a Property never leaves its region (AD-4, DG-4), and the region is stated at sign-in because it is a residency fact."
           }
         }
       },
@@ -732,7 +778,6 @@ export const CONTROL_PLANE_OPENAPI_DOCUMENT = {
         "required": [
           "tenantId",
           "name",
-          "region",
           "active",
           "createdAt"
         ],
@@ -743,15 +788,20 @@ export const CONTROL_PLANE_OPENAPI_DOCUMENT = {
           "name": {
             "type": "string"
           },
-          "region": {
-            "type": "string"
-          },
           "active": {
             "type": "boolean",
             "description": "A Tenant with operational records can be deactivated",
             "never deleted (FR-1).": null
           },
           "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "invitationId": {
+            "type": "string",
+            "description": "The first administrator's invitation. THE TOKEN IS NOT HERE and never reaches an operator: returning it would hand Jazzware a way into the customer's first administrator account, which is exactly what FR-1's \"no standing access\" forbids. Only its hash is stored, and the token itself goes to a delivery outbox the operator role can write to and cannot read."
+          },
+          "invitationExpiresAt": {
             "type": "string",
             "format": "date-time"
           }

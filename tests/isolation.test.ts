@@ -107,6 +107,29 @@ describe('cross-tenant isolation gate', () => {
     } finally { await client.end(); }
   });
 
+  it('a hotel-side session cannot provision, whichever Tenant it names (Story 1.1 AC-2)', async () => {
+    // FR-1 was amended precisely because "an administrator can create a Tenant"
+    // conflated the vendor and the customer. This is that split, asserted: the
+    // most privileged HOTEL-side credential there is cannot create a customer, and
+    // naming another Tenant does not help.
+    for (const body of [
+      { name: 'Provisioned by a tenant admin', firstAdministratorEmail: 'a@b.test' },
+      { name: 'Provisioned against B', firstAdministratorEmail: 'a@b.test', tenantId: TENANT_B },
+    ]) {
+      const res = await fetch(`${h.base}/control/v1/tenants`, {
+        method: 'POST', headers: auth(h.tokenA), body: JSON.stringify(body),
+      });
+      expect(res.status, JSON.stringify(body)).toBe(401);
+    }
+    // And the cell offers no provisioning route to find, under any guess.
+    for (const path of ['/v1/tenants', '/v1/internal/tenants', '/v1/provision']) {
+      const res = await fetch(`${h.base}${path}`, {
+        method: 'POST', headers: auth(h.tokenA), body: '{}',
+      });
+      expect(res.status, path).toBe(404);
+    }
+  });
+
   it('the event log is append-only for the application role', async () => {
     const client = new Client({ connectionString: process.env.DATABASE_URL_APP });
     await client.connect();

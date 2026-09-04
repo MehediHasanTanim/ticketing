@@ -18,7 +18,7 @@ development_status:
   # Epic 1
   epic-1: in-progress
   1-0-repository-cell-and-gates: review   # containerisation added 2026-09-03 (T8 under AC-5). 5 of 7 ACs fully green; blocked on SDK/registry access: AC-3 Dart half, T6 Flutter scaffold, and the container images have never been built. AC-7 raised 3 stack divergences + unpinned base image digests
-  1-1-provision-tenant: ready-for-dev
+  1-1-provision-tenant: review
   1-2-create-property-under-tenant: ready-for-dev
   1-3-invite-staff-member-assign-roles-per: ready-for-dev
   1-4-define-duplicate-custom-roles-with-guards: ready-for-dev
@@ -134,7 +134,7 @@ development_status:
 
   # Epic 11 - added 2026-09-04. R1, and 11.1 must precede 1.1.
   epic-11: backlog
-  11-1-sign-jazzware-operator: ready-for-dev
+  11-1-sign-jazzware-operator: review
   11-2-manage-operator-accounts: ready-for-dev
   11-3-account-what-operator-did: ready-for-dev
 

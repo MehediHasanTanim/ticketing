@@ -1,3 +1,6 @@
+import { ValidationError } from '../validation';
+
+export { ValidationError };
 import type { DomainEvent } from '../events';
 import type { Scope } from '../tenancy';
 import { assertScope } from '../tenancy';
@@ -47,6 +50,4 @@ export function recordFixtureNote(
   return scope.staffMemberId ? { ...event, staffMemberId: scope.staffMemberId } : event;
 }
 
-export class ValidationError extends Error {
-  public readonly code = 'validation_failed' as const;
-}
+

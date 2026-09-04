@@ -1,6 +1,6 @@
 # Story 11.1: Sign in as a Jazzware operator
 
-Status: ready-for-dev
+Status: review
 
 <!-- Created by bmad-create-story 2026-09-04. Story statement and acceptance criteria are transcribed verbatim from planning-artifacts/epics.md (status: final) - do not reword them here; a story needing a different criterion is a change to raise in epics.md. Epic 11: The Jazzware operator surface. -->
 
@@ -119,7 +119,61 @@ object, never a credential.
 
 ### Agent Model Used
 
-_(to be filled by the dev agent)_
+claude-opus-5 (Cowork), 2026-09-04.
+
+### Completion Notes
+
+**Built:** operator sign-in, session, sign-out, and the deployment-seeded bootstrap
+account. `/control/v1/operator/*` per `contracts/control-plane-openapi.yaml`, whose
+`x-implemented` flags for these three operations are now flipped.
+
+**AC-1 is enforced by database privileges, not by a permission check.** The control
+plane connects as `jt_control`, which migration 004 grants **nothing in the `cell`
+schema** - `SELECT count(*) FROM cell.events` as that role answers *permission denied
+for schema cell*. A check in a handler is a promise someone can widen; a role with no
+grants cannot read a Job if the code asks it to.
+
+**AC-2 and AC-3 have three independent separations**, any one of which would be a
+control someone could widen: a different signing secret, a different token
+**audience** checked on every request, and the database role above. Negative control
+23 sets the two secrets to the same value and proves the audience check alone still
+refuses an operator token at the cell - which is the failure mode a misconfiguration
+would actually produce.
+
+**AC-4** needs no sweep and no blacklist: the account's `active` flag and the
+session's `revoked_at` are read on every request, which is what "at next token
+validation, without a manual step" means.
+
+**NOT built - the remaining part of this story:** AC-5, the internal surface's
+appearance (different brand, amber accent, W35). It is a console surface and no
+console work is in this change.
+
+**REPORTED DEVIATIONS, both raised rather than absorbed:**
+
+1. *The internal surface shares a process and an origin with the cell.* Story 1.1's
+   structure notes require "no separate deployable", so it is mounted as the
+   `/control/v1` routing namespace the contract declares - but AD-4 puts the control
+   plane outside the cells, and an internal surface sharing a process with
+   tenant-facing traffic is a decision, not a detail. One image with a second
+   entrypoint and its own port is cheap now and awkward later. **Tanim's call.**
+2. *The bootstrap operator seed is Story 11.2's AC-2, taken early.* Sign-in cannot be
+   exercised without an account to sign in as. Only the seed was taken; the
+   operator-account management endpoints remain 11.2's and are still
+   `x-implemented: false`. The seeded account carries `must_change_credential`, which
+   11.2 must enforce - this story surfaces the flag and does not act on it.
+
+### File List
+
+- `ops/migrations/004_operator_and_provisioning.sql`
+- `ops/migrate.ts` (bootstrap seed, `jt_control` password rotation)
+- `adapters/src/crypto/credential.ts`
+- `adapters/src/postgres/control-plane-pool.ts`, `config.ts`
+- `edge/src/control-plane/operator-auth.ts`, `edge/src/control-plane/router.ts`
+- `edge/src/auth.ts` (the cell refuses any token carrying an audience)
+- `edge/src/server.ts` (mounts the namespace before tenancy resolution)
+- `contracts/control-plane-openapi.yaml` (flags flipped; `mustChangeCredential` added)
+- `tests/provisioning.test.ts`, `scripts/negative-controls.sh` (controls 20-23)
+- `docker-compose.yml`, `.env.example`
 
 ### Debug Log References
 

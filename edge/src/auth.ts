@@ -33,7 +33,12 @@ export function resolvePrincipal(authorization: string | undefined): Principal |
   if (a.length !== b.length || !timingSafeEqual(a, b)) return undefined;
   try {
     const p = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as {
-      tenantId?: string; propertyId?: string; staffMemberId?: string };
+      tenantId?: string; propertyId?: string; staffMemberId?: string; aud?: string };
+    // Story 11.1 AC-2: an OPERATOR credential presented to a cell endpoint is
+    // refused. A different signing secret already makes that true, so this is belt
+    // and braces for the day someone misconfigures the two secrets to the same
+    // value - a token carrying an audience is not a cell token, whatever it says.
+    if (p.aud) return undefined;
     if (!p.tenantId || !p.propertyId) return undefined;
     return {
       tenantId: asTenantId(p.tenantId),

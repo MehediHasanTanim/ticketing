@@ -158,6 +158,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenantId}/deactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Deactivate a Tenant. There is no delete.
+         * @description Story 1.1 AC-4: a Tenant with operational records is DEACTIVATED, NEVER DELETED, so this document offers no delete operation at all — the absence is the feature. The database refuses as well: DELETE is revoked from the provisioning role and a trigger raises on it, because a rule stated only in a route is a rule the next route can forget.
+         */
+        post: operations["deactivateTenant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{tenantId}/support-access": {
         parameters: {
             query?: never;
@@ -222,6 +242,8 @@ export interface components {
             scopes: string[];
             /** Format: date-time */
             expiresAt: string;
+            /** @description True for the deployment-seeded bootstrap account (Story 11.2 AC-2). Story 11.1 surfaces it; Story 11.2 builds the change endpoint and enforces it. */
+            mustChangeCredential?: boolean;
         };
         OperatorAccount: {
             operatorId: string;
@@ -265,17 +287,18 @@ export interface components {
              * @description Receives an invitation granting tenant-administrator scope ONLY, redeemed in the cell at `/auth/credential/set-up`.
              */
             firstAdministratorEmail: string;
-            /** @description Chosen at creation and IMMUTABLE thereafter — a Property never leaves its region (AD-4, DG-4), and the region is stated at sign-in because it is a residency fact. */
-            region: string;
         };
         Tenant: {
             tenantId: string;
             name: string;
-            region: string;
             /** @description A Tenant with operational records can be deactivated */
             active: boolean;
             /** Format: date-time */
             createdAt: string;
+            /** @description The first administrator's invitation. THE TOKEN IS NOT HERE and never reaches an operator: returning it would hand Jazzware a way into the customer's first administrator account, which is exactly what FR-1's "no standing access" forbids. Only its hash is stored, and the token itself goes to a delivery outbox the operator role can write to and cannot read. */
+            invitationId?: string;
+            /** Format: date-time */
+            invitationExpiresAt?: string;
         };
         SupportAccessRequest: {
             /** @description Recorded in the customer's own audit trail */
@@ -532,6 +555,40 @@ export interface operations {
             403: components["responses"]["Error"];
             409: components["responses"]["Error"];
             501: components["responses"]["NotImplemented"];
+        };
+    };
+    deactivateTenant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description the Tenant, now inactive */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Tenant"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            /** @description already deactivated */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
         };
     };
     requestSupportAccess: {

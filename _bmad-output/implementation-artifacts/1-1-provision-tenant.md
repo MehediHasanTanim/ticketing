@@ -1,6 +1,6 @@
 # Story 1.1: Provision a Tenant
 
-Status: ready-for-dev
+Status: review
 
 <!-- Created by bmad-create-story 2026-09-02. Story statement and acceptance criteria are transcribed verbatim from planning-artifacts/epics.md (status: final) - do not reword them here; a story needing a different criterion is a change to raise in epics.md. Epic 1: Property go-live foundation. -->
 
@@ -120,7 +120,74 @@ New: `core/tenant/`, `app/tenant/`, `edge/internal/`. The internal namespace is 
 
 ### Agent Model Used
 
-_(to be filled by the dev agent)_
+claude-opus-5 (Cowork), 2026-09-04. Implemented after Story 11.1, which its first
+acceptance criterion depends on.
+
+### Completion Notes
+
+**Built:** `POST /control/v1/tenants`, `.../deactivate`, `.../support-access`, with
+`core/tenant`, `app/tenant` and the control-plane event log.
+
+**AC-1.** One `TenantProvisioned` event carries the seeded role set, as T1 asks -
+seven shipped roles, the platform defaults, the invitation - and the whole
+provisioning commits in ONE transaction. Verified against a live database: 7 roles,
+**0 properties**, 1 settings row, 1 invitation, 1 event, and an entry on **both**
+audit trails.
+
+**The operator never sees the invitation token.** Returning it would hand Jazzware a
+way into the customer's first administrator account, which is exactly what FR-1's "no
+standing access" forbids. Only a hash is stored; the token goes to
+`control_plane.outbox`, on which `jt_control` holds INSERT **and nothing else** - it
+cannot read back what it wrote. Delivery is the notification adapter's job (AD-8) and
+does not exist yet, so the invitation is created and not yet delivered. **Story 1.3
+cannot be exercised end to end until that adapter exists**; flagged rather than
+worked around with a token in a response.
+
+**AC-2.** Refused server-side for every hotel-side credential, on the internal route
+(401) and on three guessed cell routes (404). Added to the **cross-tenant isolation
+gate**, per this story's testing note, including the tenant-administrator case FR-1
+was amended to separate.
+
+**AC-3.** A support-access request is recorded as `requested`, never `approved` -
+asking is not being granted - and appears on the **Tenant's own** audit trail as well
+as the operator trail. Time-boxing is enforced by a CHECK constraint: a grant cannot
+become `approved` without an expiry, so the approval story cannot forget it.
+
+**AC-4.** Deactivation returns the documented `Tenant` shape; a second attempt is
+**409**. Deletion is refused by a trigger for *every* connection including admin, not
+only by the absence of a route - a rule stated in one route is a rule the next route
+forgets. There is no delete operation in the contract at all.
+
+**Two defects this work found and fixed:**
+
+1. *The contract I wrote required a `region` on Tenant creation.* FR-83 is explicit
+   that region is chosen at **Property** creation and immutable thereafter (DG-4), and
+   FR-1 says provisioning creates no Properties - so a Tenant has no region at that
+   moment, and asking for one would have made every caller invent an answer Story 1.2
+   then reconciles. Removed.
+2. *Deactivation answered 400 where the contract documents 409, and returned a
+   two-field object where the contract says `Tenant`.* The codegen-drift gate proves
+   the bindings match the document; nothing proved a **running** operation did. Now
+   asserted by reading the required fields out of the compiled document and checking
+   the live response against them.
+
+Also fixed: a second `ValidationError` class in `core/tenant` that type-checked and
+would have turned a 400 into a 500 at the first tenant validation failure, because
+the cell's handler tests identity rather than shape. One class now, in
+`core/src/validation.ts`.
+
+**Not built, per the scope guards:** no Properties (1.2), no role assignment beyond
+the first administrator's invitation (1.3), no custom roles (1.4), no identity
+provider (1.5), no Tenant settings surface (1.6). Support-grant **approval** and
+expiry-at-next-validation are not built either: only the request is, which is what
+AC-3 specifies.
+
+### File List
+
+Shared with Story 11.1, plus `core/src/tenant/provision.ts`,
+`core/src/validation.ts`, `app/src/tenant/provision-tenant.ts`,
+`tests/unit/tenant.test.ts`, `tests/isolation.test.ts`,
+`tests/control-plane.test.ts` (contact-shaped column allowlist).
 
 ### Debug Log References
 

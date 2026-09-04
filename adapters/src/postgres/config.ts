@@ -20,4 +20,13 @@ export const appConnectionString = (): string =>
 export const adminConnectionString = (): string =>
   need('DATABASE_URL_ADMIN');
 
+/**
+ * The Jazzware-internal surface connects as its OWN role, `jt_control`, which is
+ * granted nothing in the `cell` schema (migration 004). That is Story 11.1 AC-1 -
+ * an operator session grants no read of tenant data - as a database fact rather
+ * than a permission check somebody could later widen.
+ */
+export const controlConnectionString = (): string =>
+  need('DATABASE_URL_CONTROL');
+
 export const cellName = (): string => need('CELL_NAME', 'local-dev');
