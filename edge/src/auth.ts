@@ -13,7 +13,28 @@ import { asTenantId, asPropertyId, asStaffMemberId } from '../../core/src/tenanc
  */
 export interface Principal extends Scope {}
 
-const secret = (): string => process.env.FIXTURE_AUTH_SECRET ?? 'story-1-0-fixture-secret';
+/**
+ * Required whenever the stub is switched on. It used to fall back to a constant,
+ * which is published now that the repository is public - so a deployment that set
+ * `FIXTURE_AUTH=1` without a secret would accept tokens anyone could mint. The stub
+ * must never be on outside local and CI, and this makes "on without a secret"
+ * refuse rather than pretend.
+ */
+const MIN_SECRET_LENGTH = 24;
+
+const secret = (): string => {
+  const v = process.env.FIXTURE_AUTH_SECRET;
+  if (!v || v.length < MIN_SECRET_LENGTH) {
+    throw new Error(
+      `FIXTURE_AUTH=1 requires FIXTURE_AUTH_SECRET of at least ${MIN_SECRET_LENGTH} `
+      + 'characters. The fixture stub is Story 1.0 only and must never be enabled '
+      + 'outside local and CI; there is no fallback secret.');
+  }
+  return v;
+};
+
+/** Boot-time check, so `FIXTURE_AUTH=1` without a secret refuses to start. */
+export const fixtureSecretOrThrow = (): string => secret();
 
 export function mintFixtureToken(p: { tenantId: string; propertyId: string; staffMemberId: string }): string {
   const body = Buffer.from(JSON.stringify(p)).toString('base64url');

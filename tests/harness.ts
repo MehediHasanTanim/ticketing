@@ -17,6 +17,11 @@ export interface Harness {
 
 export async function start(): Promise<Harness> {
   process.env.FIXTURE_AUTH = '1';
+  // Both secrets fail closed with no fallback (they are published source, and the
+  // repository is public), so the harness supplies its own rather than relying on
+  // an ambient value that would make the suite pass or fail by environment.
+  process.env.FIXTURE_AUTH_SECRET ??= 'suite-fixture-secret-not-a-real-one';
+  process.env.CONTROL_PLANE_TOKEN_SECRET ??= 'suite-control-plane-secret-not-real';
   const server: Server = createApp();
   await new Promise<void>((res) => server.listen(0, '127.0.0.1', () => res()));
   const addr = server.address();

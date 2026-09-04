@@ -22,14 +22,53 @@ export { hashCredential, verifyCredential } from '../../../adapters/src/crypto/c
 
 export const OPERATOR_AUDIENCE = 'jazzticketing-control-plane';
 
+/**
+ * FAILS CLOSED, and that is the whole point of this function.
+ *
+ * This used to fall back to a constant when the variable was unset, which was
+ * merely untidy while the repository was private and became a hole the moment it
+ * went public: anyone reading the source could mint a valid operator token against
+ * a deployment that forgot the variable - and an operator token provisions
+ * customers. A forgotten environment variable should be a container that will not
+ * start, not a signing key everybody has.
+ *
+ * The rest of this codebase already works this way: `need()` in
+ * `adapters/src/postgres/config.ts` throws on missing configuration rather than
+ * guessing. Local development is unaffected because compose and `.env.example`
+ * both set this.
+ *
+ * MINIMUM LENGTH, not just presence. A one-character secret satisfies "is set"
+ * while being trivially brute-forced, and the failure mode of a too-short HMAC key
+ * is silence.
+ */
+const MIN_SECRET_LENGTH = 24;
+
 const tokenSecret = (): string => {
   const v = process.env.CONTROL_PLANE_TOKEN_SECRET;
-  if (v && v.length > 0) return v;
-  // Local development only, and deliberately not the cell's secret. If these two
-  // were ever set to the same string, the audience check below still separates the
-  // surfaces.
-  return 'story-11-1-control-plane-local-only';
+  if (!v || v.length === 0) {
+    throw new Error(
+      'CONTROL_PLANE_TOKEN_SECRET is required: the Jazzware-internal surface signs '
+      + 'operator tokens with it, and there is deliberately no fallback. Set it from '
+      + 'the platform secret store (see .env.example).');
+  }
+  if (v.length < MIN_SECRET_LENGTH) {
+    throw new Error(
+      `CONTROL_PLANE_TOKEN_SECRET must be at least ${MIN_SECRET_LENGTH} characters; `
+      + 'it is an HMAC key for the surface that provisions customers.');
+  }
+  return v;
 };
+
+/**
+ * The internal surface is always mounted (it is a routing namespace, not a separate
+ * deployable), so its secret is always required. Kept as a named constant rather
+ * than an inline `true` so that if the deployable is ever split - the open decision
+ * in Story 11.1's record - there is one place to make it conditional.
+ */
+export const CONTROL_PLANE_ENABLED = true;
+
+/** Boot-time check, so a missing secret stops the process instead of a request. */
+export const controlPlaneSecretOrThrow = (): string => tokenSecret();
 
 export interface OperatorPrincipal {
   operatorId: string;

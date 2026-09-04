@@ -252,7 +252,7 @@ echo "== 23. cross-surface tokens: make the two surfaces share one secret =="
 # The audience check is what survives this. If it is ever removed, an operator
 # token becomes a cell token the moment someone misconfigures the secrets alike.
 expect_red "cross-surface tokens, shared secret defeated by the audience check" \
-  env CONTROL_PLANE_TOKEN_SECRET="${FIXTURE_AUTH_SECRET:-story-1-0-fixture-secret}" \
+  env CONTROL_PLANE_TOKEN_SECRET="${FIXTURE_AUTH_SECRET:?set it in .env}" \
   node -e '
     const { mintOperatorToken } = require("./dist/edge/src/control-plane/operator-auth.js");
     const { resolvePrincipal } = require("./dist/edge/src/auth.js");
@@ -277,6 +277,39 @@ PY2
 CONTROL_PLANE_DOCS=1 expect_red "docs surfaces, internal document under the cell prefix" \
   npx vitest run tests/provisioning.test.ts
 cp /tmp/docs.nc.bak edge/src/docs.ts
+
+echo "== 25. secrets fail closed: reinstate a fallback signing secret =="
+# Both token secrets used to fall back to a constant. Untidy while the repository
+# was private; a hole the moment it went public, because an operator token signs the
+# surface that provisions customers - a published fallback is a signing key
+# everybody has. The check must THROW when the variable is unset.
+#
+# Exercised through the exported check rather than by booting a server: the first
+# version of this control backgrounded a process inside `sh -c`, so the subshell
+# never exited and the whole suite hung. A control that cannot finish is worse than
+# no control.
+cp edge/src/control-plane/operator-auth.ts /tmp/opauth.nc.bak
+python3 - <<'PY2'
+import pathlib, re
+p = pathlib.Path('edge/src/control-plane/operator-auth.ts'); t = p.read_text()
+t = re.sub(r"  if \(!v \|\| v\.length === 0\) \{\n(?:.*\n)*?  \}\n",
+           "  if (!v || v.length === 0) return 'story-11-1-control-plane-local-only';\n",
+           t, count=1)
+p.write_text(t)
+PY2
+npm run --silent build >/dev/null 2>&1
+expect_red "secrets fail closed, no fallback signing key" \
+  env -u CONTROL_PLANE_TOKEN_SECRET node -e '
+    const { controlPlaneSecretOrThrow } = require("./dist/edge/src/control-plane/operator-auth.js");
+    try {
+      controlPlaneSecretOrThrow();
+      console.error("handed out a signing secret with the variable unset");
+      process.exit(1);          // the check FAILED - which is what expect_red wants
+    } catch {
+      process.exit(0);          // correctly refused
+    }'
+cp /tmp/opauth.nc.bak edge/src/control-plane/operator-auth.ts
+npm run --silent build >/dev/null 2>&1
 
 echo
 echo "negative controls: ${pass} correctly went red, ${fail} did not, ${unverified} unverifiable here"

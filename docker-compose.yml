@@ -102,7 +102,14 @@ services:
       # by a cell and a cell token cannot be verified here. The audience check in
       # operator-auth.ts is what still separates them if these are ever set alike -
       # negative control 23 proves it.
-      CONTROL_PLANE_TOKEN_SECRET: ${CONTROL_PLANE_TOKEN_SECRET:-}
+      #
+      # NO DEFAULT, deliberately: a default here would be a signing key published in
+      # this file, which is exactly what was removed from the source. Unset means the
+      # api container refuses to start and says why. Put a value in `.env`
+      # (gitignored) - `openssl rand -base64 32` - or supply it from the platform
+      # secret store.
+      CONTROL_PLANE_TOKEN_SECRET: ${CONTROL_PLANE_TOKEN_SECRET:?set it in .env - openssl rand -base64 32}
+      FIXTURE_AUTH_SECRET: ${FIXTURE_AUTH_SECRET:-}
       # Swagger UI for the INTERNAL surface, at /control/v1/docs. Off unless set to
       # 1, unlike the cell's: FR-1 makes non-advertisement a property of this
       # surface, so publishing its shape is a deliberate act rather than a default.

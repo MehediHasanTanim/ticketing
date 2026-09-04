@@ -1,6 +1,27 @@
 import { createApp } from './server';
 import { cellName } from '../../adapters/src/postgres/config';
 import { closePool } from '../../adapters/src/postgres/pool';
+import { fixtureSecretOrThrow } from './auth';
+import { controlPlaneSecretOrThrow, CONTROL_PLANE_ENABLED } from './control-plane/operator-auth';
+
+/**
+ * Configuration is checked BEFORE the listener opens, so a missing secret is a
+ * container that refuses to start rather than one that starts and fails at the
+ * first sign-in. Both of these throw when unset (there is deliberately no fallback
+ * for either), and calling them here is what turns that into a boot failure with a
+ * legible message in the container log.
+ */
+const assertSecretsPresent = (): void => {
+  if (process.env.FIXTURE_AUTH === '1') fixtureSecretOrThrow();
+  if (CONTROL_PLANE_ENABLED) controlPlaneSecretOrThrow();
+};
+
+try {
+  assertSecretsPresent();
+} catch (err) {
+  console.error(`[jazzticketing] refusing to start: ${(err as Error).message}`);
+  process.exit(1);
+}
 
 const port = Number(process.env.PORT ?? 3001);
 const server = createApp();

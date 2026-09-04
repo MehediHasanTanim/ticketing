@@ -14,6 +14,12 @@ env:
   DATABASE_URL_APP: postgres://jt_app:jt_app_local_only@127.0.0.1:5432/jazzticketing
   REDIS_URL: redis://127.0.0.1:6379
   FIXTURE_AUTH: "1"
+  # Test-only, and safe to read: they apply solely to the throwaway service
+  # containers in this workflow. The source carries no fallback for either, so CI
+  # has to state them like any other environment.
+  FIXTURE_AUTH_SECRET: ci-fixture-secret-throwaway-value
+  CONTROL_PLANE_TOKEN_SECRET: ci-control-plane-secret-throwaway
+  DATABASE_URL_CONTROL: postgres://jt_control:jt_control_local_only@127.0.0.1:5432/jazzticketing
 
 jobs:
   build-and-boundaries:
