@@ -7,6 +7,8 @@
     "node": ">=22"
   },
   "scripts": {
+    "refresh": "bash scripts/dev-refresh.sh",
+    "refresh:watch": "node scripts/dev-watch.mjs",
     "build": "tsc -p tsconfig.json",
     "codegen": "node contracts/scripts/gen-ts.mjs",
     "migrate": "node dist/ops/migrate.js",
