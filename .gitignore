@@ -4,3 +4,9 @@ dist/
 *.log
 .dart_tool/
 clients/console/dist/
+
+# Scratch delivery archives. Ten of these were tracked and were purged from
+# history before the first push; ignoring the pattern is what stops it recurring.
+*.tgz
+*.tar
+*.bundle
