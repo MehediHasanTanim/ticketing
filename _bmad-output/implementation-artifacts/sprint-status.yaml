@@ -21,7 +21,7 @@ development_status:
   1-1-provision-tenant: review
   1-2-create-property-under-tenant: review
   1-3-invite-staff-member-assign-roles-per: review
-  1-4-define-duplicate-custom-roles-with-guards: ready-for-dev
+  1-4-define-duplicate-custom-roles-with-guards: review
   1-5-connect-tenant-identity-provider: ready-for-dev
   1-6-manage-tenant-defaults-see-blast-radius: ready-for-dev
   1-7-configure-departments-locations-rooms: ready-for-dev

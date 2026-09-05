@@ -25,6 +25,10 @@ import {
   ConflictError as StaffConflict,
 } from '../../app/src/staff/invite-staff-member';
 import type { Permission } from '../../core/src/staff/roles';
+import {
+  handleDuplicateRole, handleUpdateRole, listPermissions,
+  ShippedRoleImmutable, RoleKeyTaken, Escalation, DependencyUnmet,
+} from '../../app/src/role/manage';
 import type { SessionView } from '../../app/src/staff/sessions';
 import { docsEnabled, serveDocsAsset, serveDocsPage, serveOpenApiDocument } from './docs';
 import { unimplementedStory } from './not-implemented';
@@ -364,8 +368,38 @@ export function createApp(): Server {
         return fail(res, 'not_found');
       }
 
-      // ---- the role picker and staff invitation (Story 1.3 AC-1, AC-2, AC-5) ----
-      if (url.pathname === '/v1/roles' || url.pathname === '/v1/staff') {
+      // ---- defining roles (Story 1.4, FR-81) ----
+      // Separate from the /v1/roles read below, because these two are the guarded
+      // writes and the read is a picker. `role.define` is TENANT-scope, so a property
+      // administrator responsible for one Property cannot define roles for the estate
+      // - the same reasoning that puts property.create out of their reach.
+      const roleWrite = /^\/v1\/roles\/([^/]+)(\/duplicate)?$/.exec(url.pathname);
+      if (roleWrite && (req.method === 'POST' || req.method === 'PATCH')) {
+        const principal = resolveCellPrincipal(req.headers.authorization, now);
+        if (!principal) return fail(res, 'unauthenticated');
+        if (!(await gate(res, principal, 'role.define', now))) return;
+        const scope = tenantScopeOf(principal);
+        const actor = {
+          tenantId: principal.tenantId, staffMemberId: principal.staffMemberId,
+          credentialType: principal.credentialType,
+        };
+        const key = decodeURIComponent(roleWrite[1] ?? '');
+        const body = await readBody(req);
+
+        if (req.method === 'POST' && roleWrite[2]) {
+          return json(res, 201, await withTenantScope(scope, (c) =>
+            handleDuplicateRole(c, actor, key, body, now)));
+        }
+        if (req.method === 'PATCH' && !roleWrite[2]) {
+          return json(res, 200, await withTenantScope(scope, (c) =>
+            handleUpdateRole(c, actor, key, body, now)));
+        }
+        return fail(res, 'not_found');
+      }
+
+      // ---- the role picker, the permission catalogue, and staff invitation ----
+      if (url.pathname === '/v1/roles' || url.pathname === '/v1/staff'
+          || url.pathname === '/v1/permissions') {
         const principal = resolveCellPrincipal(req.headers.authorization, now);
         if (!principal) return fail(res, 'unauthenticated');
         const scope = tenantScopeOf(principal);
@@ -373,6 +407,16 @@ export function createApp(): Server {
         if (readMethod && url.pathname === '/v1/roles') {
           if (!(await gate(res, principal, 'role.read', now))) return;
           return json(res, 200, await withTenantScope(scope, (c) => listRoles(c, principal.tenantId)));
+        }
+
+        if (readMethod && url.pathname === '/v1/permissions') {
+          // THE DEPENDENCY GRAPH, served rather than restated in the console (Story 1.4
+          // T1): one graph, one function that reads it, and no hand-written conditional
+          // per screen to drift away from the server's answer. It is a catalogue of
+          // what this build can do and holds no Tenant data, but it is gated all the
+          // same - a permission editor is not a surface a room attendant needs.
+          if (!(await gate(res, principal, 'role.read', now))) return;
+          return json(res, 200, listPermissions());
         }
 
         if (req.method === 'POST' && url.pathname === '/v1/staff') {
@@ -515,6 +559,17 @@ export function createApp(): Server {
       if (err instanceof StaffForbidden) return fail(res, 'forbidden', { reason: err.message });
       if (err instanceof StaffNotFound) return fail(res, 'not_found');
       if (err instanceof StaffConflict) return fail(res, 'conflict', { reason: err.message });
+      // Story 1.4's guards, each mapped in exactly one place. The escalation refusal
+      // NAMES the permission and the dependency refusal names every unmet pair,
+      // because "you may not do that" with no subject is a refusal nobody can act on.
+      if (err instanceof Escalation) {
+        return fail(res, 'forbidden', { reason: err.message, permission: err.permission });
+      }
+      if (err instanceof DependencyUnmet) {
+        return fail(res, 'validation_failed', { reason: err.message, unmet: err.unmet });
+      }
+      if (err instanceof ShippedRoleImmutable) return fail(res, 'conflict', { reason: err.message });
+      if (err instanceof RoleKeyTaken) return fail(res, 'conflict', { reason: err.message });
       if (err instanceof PropertyConflict) return fail(res, 'conflict', { reason: err.message });
       if (err instanceof PropertyNotFound) return fail(res, 'not_found');
       if (err instanceof ValidationError) return fail(res, 'validation_failed', { reason: err.message });

@@ -1,6 +1,6 @@
 # Story 1.4: Define and duplicate custom roles with guards
 
-Status: ready-for-dev
+Status: review
 
 <!-- Created by bmad-create-story 2026-09-02. Story statement and acceptance criteria are transcribed verbatim from planning-artifacts/epics.md (status: final) - do not reword them here; a story needing a different criterion is a change to raise in epics.md. Epic 1: Property go-live foundation. -->
 
@@ -94,10 +94,132 @@ New: `core/role/` (permission graph and guards — pure), `app/role/`. The guard
 
 ### Agent Model Used
 
-_(to be filled by the dev agent)_
+claude-opus-5 (Cowork, remote session linked to tanim-m4-pro-local). Contracts first,
+then migration, then `core/` (where both guards live), then `app/`, `edge/`, tests, gates.
 
 ### Debug Log References
 
+`.dev-refresh.log` on the Mac. Additionally verified by execution in this session's cloud
+container against a real Postgres 16 — see the verification note below.
+
 ### Completion Notes List
 
+**All four acceptance criteria are built, and the guards are in `core/` where they are
+unit-testable without HTTP.** The PRD's `[NOTE FOR PM]` and the story both say this is
+not a form; the shape of the work reflects that. `core/src/role/define.ts` holds the
+dependency evaluation, the escalation guard and both mutation aggregates, with no I/O and
+no clock of its own. `app/src/role/manage.ts` is the transaction and the audit trail and
+nothing else.
+
+**The dependency graph is data, and it is SERVED.** Each permission declares `dependsOn`;
+one function evaluates it; `GET /v1/permissions` publishes the graph so the console reads
+the same definition the server enforces. T1 asked for exactly this — "a hand-written
+conditional per screen will drift" — and serving it is what makes one function possible
+rather than aspirational. The refusal names every unmet pair, not the first, because the
+operation sends a whole set and fixing them one round trip at a time would be a worse
+interface than the criterion describes.
+
+**The escalation guard compares against the actor's TENANT-WIDE effective permissions**,
+not their session's. A role is a Tenant-wide object, so the authority to write a
+permission into one has to be Tenant-wide too — otherwise a permission held at one
+Property becomes a Tenant-wide capability by being written into a definition that
+somebody then assigns at another. It is checked **before** the dependency guard, so a
+failing dependency can never mask an escalation attempt in the audit trail. And it
+applies to DUPLICATION as well as editing: without that, copying the property
+administrator would be the way around it.
+
+**Duplication is by value and shares no code with Property inheritance**, as the story
+requires. A negative control (38) makes the copy share its source's array and proves the
+independence test goes red.
+
+**The seam Story 1.3 left open is closed.** 1.3 said in as many words that "Story 1.4
+brings custom roles, whose permissions live in the database rather than here". Permission
+sets now live in `control_plane.roles.permissions`, per Tenant; `resolvePermissions` reads
+each grant's own set and stays pure. `ROLE_PERMISSIONS` survives as the shipped baseline —
+what Story 1.1 seeds and what migration 009 backfilled — and a unit test parses the
+migration and asserts the two agree, because drift between a constant and a migration
+surprises one Tenant and not the others.
+
+**An array, not a join table.** A role's permissions are one fact, read and written whole,
+and FR-6 wants the PREVIOUS VALUE of a change: with an array that is a reading, with rows
+it is a reconstruction from what was inserted and deleted. It also means editing a role
+needs no DELETE privilege anywhere, which keeps Story 1.3's "no DELETE on anything"
+intact.
+
+**A defect this story introduced into Story 1.3, and how it was found.** Making a role
+Tenant-assignable is now a per-Tenant stored fact, but `inviteStaffMember` was still
+checking a hard-coded list of the two SHIPPED roles that may be held Tenant-wide — a list
+a custom role could never join, so a Tenant-wide custom role would have been defined
+successfully and then refused at assignment. Both values are `string`, so the type system
+saw nothing; it surfaced only when the boundary test tried to assign one. The guard now
+reads the Tenant's catalogue, `shippedRoleAssignableAtScope` is renamed to say it is the
+SEED and not a live check, and both a unit test and a boundary test cover it.
+
+**Judgement calls, stated rather than buried.**
+
+1. **A third coherence refusal.** A role carrying a `tenant`-scope permission must be
+   assignable Tenant-wide, or that permission can never be conferred by it. The story
+   names two guards, not three — but the story statement says the point is that an
+   administrator cannot "create an incoherent or escalated role", and an inert permission
+   sitting in a role editor reads as a capability. Refused with a message that says how to
+   fix it.
+2. **`role.define` is one permission, not `role.create` plus `role.edit`.** The story is
+   "duplicate a shipped role and edit the copy" — one act in two steps, and a hotel that
+   may do half of it can produce a copy it cannot then correct.
+3. **On edit, only what is being ADDED is measured against the caller's own set.** An
+   administrator who inherits a role holding something they lack can still rename it or fix
+   an unrelated permission; what they cannot do is add one. Measuring the whole set would
+   make such a role permanently uneditable by anyone but its author, which AC-3 does not
+   ask for and which would quietly strand roles.
+
+**Raised, not decided: the Recovery approval threshold cannot be set on a shipped role.**
+AC-1 makes shipped roles not editable, and the threshold is part of a role, so setting one
+means duplicating first. That follows from FR-81 as written and is implemented that way.
+If hotels are meant to set thresholds on the shipped seven without duplicating them, the
+threshold belongs on a Tenant setting keyed by role rather than on the role itself — a
+change to raise in epics.md, not to reinterpret in code.
+
+**Scope guards honoured.** No role assignment (1.3), no Tenant defaults (1.6), no approval
+routing (9.4 — the threshold is stored and nothing consumes it), and no role deletion at
+all: a role key is what `staff_roles` stores, so deleting one would orphan every
+assignment. Refused at the database for every connection.
+
+**VERIFIED BY EXECUTION.** The tree was mirrored into this session's cloud container and
+run against a real Postgres 16, twice: migration 009 applied **on top of** an
+already-migrated 001–008 database (the path Tanim's container will take, and the only path
+that exercises the backfill), and all nine applied **from scratch**. **181/181 tests pass
+both ways, and 39 of 41 negative controls red-verified** — 0 failures, 1 unverifiable (the
+Dart half, no SDK there), 1 skipped (console dependencies). All six new controls go red on
+demand. This is not a substitute for `npm run refresh` on the Mac; two earlier defects
+lived precisely in the gap between the two.
+
 ### File List
+
+**New**
+
+- `ops/migrations/009_custom_roles.sql`
+- `core/src/role/define.ts` — both guards, duplication and editing (pure)
+- `app/src/role/manage.ts` — the transaction and the audit trail
+- `tests/unit/role.test.ts` (28 tests), `tests/role.test.ts`
+- `contracts/openapi.yaml` — `GET /permissions`, `POST /roles/{roleKey}/duplicate`,
+  `PATCH /roles/{roleKey}`; schemas `PermissionSpec`, `DuplicateRoleRequest`,
+  `UpdateRoleRequest`
+
+**Changed**
+
+- `contracts/openapi.yaml` — `Role` gains `permissions`, `editable`, `duplicatedFrom`,
+  `independentOfSource`, `recoveryApprovalThreshold`, `updatedAt`
+- `core/src/staff/roles.ts` — permissions declare `dependsOn`; `role.define` added;
+  `Grant` carries the role's stored set; `unmappedRoles` becomes `unknownPermissions`;
+  `roleAssignableAtScope` renamed `shippedRoleAssignableAtScope` and narrowed to the seed
+- `core/src/staff/invite.ts` — Tenant-wide assignability read from the Tenant's catalogue
+- `core/src/tenant/provision.ts`, `app/src/tenant/provision-tenant.ts` — a new Tenant is
+  seeded with each role's permission set and Tenant-assignability
+- `app/src/staff/sessions.ts` — `loadGrants` joins the role; `tenantWidePermissions` added
+  for the escalation guard
+- `app/src/staff/invite-staff-member.ts` — `listRoles` serves the editor's fields
+- `edge/src/server.ts` — the role write routes, gated on `role.define`; the three new
+  refusals mapped in one place
+- `docs/decisions/0003-one-permission-decision-point.md` — amended
+- `tests/unit/staff.test.ts` — refitted for per-Tenant sets, plus the assignability defect
+- `scripts/negative-controls.sh` — controls 36–41

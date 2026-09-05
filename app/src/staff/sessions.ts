@@ -83,12 +83,47 @@ export interface TokenClaims {
 export async function loadGrants(
   client: PoolClient, tenantId: string, staffMemberId: string, propertyId: string | undefined,
 ): Promise<Grant[]> {
-  const res = await client.query<{ role_key: string; property_id: string | null }>(
-    `SELECT role_key, property_id FROM control_plane.staff_roles
-      WHERE tenant_id = $1 AND staff_member_id = $2
-        AND (property_id IS NULL OR property_id = $3)`,
+  // JOINED TO THE ROLE since Story 1.4: a permission set is a property of a role IN A
+  // TENANT now, not a constant in the build, because FR-81 lets a hotel duplicate a
+  // shipped role and edit the copy. An INNER join is right - a grant naming a role
+  // that does not exist confers nothing, and the foreign key means it cannot happen.
+  const res = await client.query<{ role_key: string; property_id: string | null; permissions: string[] }>(
+    `SELECT sr.role_key, sr.property_id, r.permissions
+       FROM control_plane.staff_roles sr
+       JOIN control_plane.roles r ON r.tenant_id = sr.tenant_id AND r.key = sr.role_key
+      WHERE sr.tenant_id = $1 AND sr.staff_member_id = $2
+        AND (sr.property_id IS NULL OR sr.property_id = $3)`,
     [tenantId, staffMemberId, propertyId ?? null]);
-  return res.rows.map((r) => ({ roleKey: r.role_key, scope: r.property_id === null ? 'tenant' : 'property' }));
+  return res.rows.map((r) => ({
+    roleKey: r.role_key,
+    scope: r.property_id === null ? 'tenant' : 'property',
+    permissions: r.permissions ?? [],
+  }));
+}
+
+/**
+ * The actor's TENANT-WIDE effective permissions, which is what Story 1.4's escalation
+ * guard compares a requested role against (AC-3).
+ *
+ * Tenant-wide grants ONLY, deliberately: a role is a Tenant-wide object, so authority
+ * to write a permission into one has to be Tenant-wide too. Comparing against the
+ * session's set would let a permission held at one Property become a Tenant-wide
+ * capability by being written into a definition somebody then assigns elsewhere.
+ * The credential filter still applies, so a PIN session defines nothing.
+ */
+export async function tenantWidePermissions(
+  client: PoolClient, tenantId: string, staffMemberId: string, credentialType: CredentialType,
+): Promise<Set<string>> {
+  const res = await client.query<{ role_key: string; permissions: string[] }>(
+    `SELECT sr.role_key, r.permissions
+       FROM control_plane.staff_roles sr
+       JOIN control_plane.roles r ON r.tenant_id = sr.tenant_id AND r.key = sr.role_key
+      WHERE sr.tenant_id = $1 AND sr.staff_member_id = $2 AND sr.property_id IS NULL`,
+    [tenantId, staffMemberId]);
+  const grants: Grant[] = res.rows.map((r) => ({
+    roleKey: r.role_key, scope: 'tenant', permissions: r.permissions ?? [],
+  }));
+  return new Set(resolvePermissions(grants, credentialType).permissions);
 }
 
 /**
@@ -164,13 +199,15 @@ export async function resolveSession(
   }
 
   const grants = await loadGrants(client, claims.tenantId, claims.staffMemberId, claims.propertyId);
-  const { permissions, unmappedRoles } = resolvePermissions(grants, claims.credentialType);
-  if (unmappedRoles.length > 0) {
-    // Loud, and not fatal. Until Story 1.4 there should be no such role, so this is a
-    // seeding defect - and a permission model that fails silently is one nobody finds
-    // out about until a shift cannot work. No staff identifier in the line (DG-5).
-    console.warn('[authz] roles with no permission mapping', JSON.stringify({
-      tenantId: claims.tenantId, roles: unmappedRoles,
+  const { permissions, unknownPermissions } = resolvePermissions(grants, claims.credentialType);
+  if (unknownPermissions.length > 0) {
+    // Loud, and not fatal. A stored permission this build has never heard of confers
+    // nothing - a role written by a newer build, or a permission retired from the
+    // catalogue while roles still name it. A permission model that fails silently is
+    // one nobody finds out about until a shift cannot work. No staff identifier in the
+    // line (DG-5).
+    console.warn('[authz] stored permissions this build does not know', JSON.stringify({
+      tenantId: claims.tenantId, permissions: unknownPermissions,
     }));
   }
 

@@ -43,9 +43,17 @@ export async function handleProvisionTenant(
   // creates NO Properties and NO identity connection - those are the customer's to
   // configure (Story 1.5 connects one). Nothing below writes a property row.
   for (const role of event.payload.roles) {
+    // The permission set is written HERE from Story 1.4 onwards: it lives per Tenant
+    // in `control_plane.roles`, and migration 009 backfilled every Tenant that already
+    // existed. `core/src/staff/roles.ts` stays the authority for what a NEW Tenant is
+    // seeded with; `tests/unit/role.test.ts` asserts it agrees with what 009 wrote,
+    // because drift between a constant and a migration surprises one Tenant and not
+    // the others.
     await client.query(
-      'INSERT INTO control_plane.roles (tenant_id, key, name, is_shipped) VALUES ($1, $2, $3, true)',
-      [tenantId, role.key, role.name],
+      `INSERT INTO control_plane.roles
+         (tenant_id, key, name, is_shipped, permissions, assignable_at_tenant_scope, created_by)
+       VALUES ($1, $2, $3, true, $4, $5, 'jazzware_operator')`,
+      [tenantId, role.key, role.name, role.permissions, role.assignableAtTenantScope],
     );
   }
   await client.query(

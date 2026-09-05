@@ -4,7 +4,7 @@ import {
   type NormalisedRole, type PairVerdict,
 } from '../../../core/src/staff/invite';
 import {
-  resolvePermissions, roleAssignableAtScope, TENANT_ASSIGNABLE_ROLES,
+  resolvePermissions, TENANT_ASSIGNABLE_ROLES,
   type CredentialType, type Grant,
 } from '../../../core/src/staff/roles';
 import { ValidationError } from '../../../core/src/validation';
@@ -40,7 +40,13 @@ export interface RoleView {
   key: string;
   name: string;
   isShipped: boolean;
+  editable: boolean;
   assignableAtTenantScope: boolean;
+  permissions: string[];
+  duplicatedFrom?: string;
+  independentOfSource: true;
+  recoveryApprovalThreshold?: number;
+  updatedAt?: string;
 }
 
 /**
@@ -50,13 +56,34 @@ export interface RoleView {
  * Tenant impossible to pick.
  */
 export async function listRoles(client: PoolClient, tenantId: string): Promise<RoleView[]> {
-  const res = await client.query<{ key: string; name: string; is_shipped: boolean }>(
-    `SELECT key, name, is_shipped FROM control_plane.roles
-      WHERE tenant_id = $1 ORDER BY is_shipped DESC, key`, [tenantId]);
+  // Every field the role editor needs since Story 1.4, including the permission set -
+  // which now lives here, per Tenant, rather than in the build.
+  const res = await client.query<{
+    key: string; name: string; is_shipped: boolean; permissions: string[] | null;
+    assignable_at_tenant_scope: boolean; duplicated_from: string | null;
+    recovery_approval_threshold: number | null; updated_at: Date | null;
+  }>(
+    `SELECT key, name, is_shipped, permissions, assignable_at_tenant_scope,
+            duplicated_from, recovery_approval_threshold, updated_at
+       FROM control_plane.roles WHERE tenant_id = $1 ORDER BY is_shipped DESC, key`,
+    [tenantId]);
   return res.rows.map((r) => ({
-    key: r.key, name: r.name, isShipped: r.is_shipped,
-    // The part a picker cannot infer, so it does not have to guess.
-    assignableAtTenantScope: roleAssignableAtScope(r.key, 'tenant'),
+    key: r.key,
+    name: r.name,
+    isShipped: r.is_shipped,
+    // A shipped role is duplicable and never editable (FR-81). Its own field rather
+    // than the client negating isShipped, so a later reason to lock a role does not
+    // mean every screen relearns the rule.
+    editable: !r.is_shipped,
+    // STORED, not derived: a corporate viewer holds only Property-scope permissions and
+    // is Tenant-wide by design (Story 1.3 AC-5), so no derivation can be right.
+    assignableAtTenantScope: r.assignable_at_tenant_scope,
+    permissions: [...(r.permissions ?? [])].sort(),
+    ...(r.duplicated_from ? { duplicatedFrom: r.duplicated_from } : {}),
+    independentOfSource: true as const,
+    ...(r.recovery_approval_threshold !== null
+      ? { recoveryApprovalThreshold: r.recovery_approval_threshold } : {}),
+    ...(r.updated_at ? { updatedAt: r.updated_at.toISOString() } : {}),
   }));
 }
 
@@ -64,13 +91,18 @@ export async function listRoles(client: PoolClient, tenantId: string): Promise<R
 async function callerGrants(
   client: PoolClient, tenantId: string, staffMemberId: string,
 ): Promise<Array<Grant & { propertyId: string | null }>> {
-  const res = await client.query<{ role_key: string; property_id: string | null }>(
-    'SELECT role_key, property_id FROM control_plane.staff_roles WHERE tenant_id = $1 AND staff_member_id = $2',
+  // Joined to the role, because Story 1.4 moved permission sets into the Tenant.
+  const res = await client.query<{ role_key: string; property_id: string | null; permissions: string[] }>(
+    `SELECT sr.role_key, sr.property_id, r.permissions
+       FROM control_plane.staff_roles sr
+       JOIN control_plane.roles r ON r.tenant_id = sr.tenant_id AND r.key = sr.role_key
+      WHERE sr.tenant_id = $1 AND sr.staff_member_id = $2`,
     [tenantId, staffMemberId]);
   return res.rows.map((r) => ({
     roleKey: r.role_key,
     propertyId: r.property_id,
     scope: r.property_id === null ? 'tenant' : 'property',
+    permissions: r.permissions ?? [],
   }));
 }
 
@@ -120,12 +152,16 @@ export async function handleInviteStaffMember(
   if (!tenant.rows[0]) throw new NotFound('no such Tenant');
   if (!tenant.rows[0].active) throw new ConflictError('this Tenant is deactivated');
 
-  const catalogue = await client.query<{ key: string }>(
-    'SELECT key FROM control_plane.roles WHERE tenant_id = $1', [actor.tenantId]);
+  const catalogue = await client.query<{ key: string; assignable_at_tenant_scope: boolean }>(
+    'SELECT key, assignable_at_tenant_scope FROM control_plane.roles WHERE tenant_id = $1',
+    [actor.tenantId]);
 
   // The aggregate validates the request - names, language, DG-5 refusals, role keys,
   // Tenant-wide assignability - before anything is authorised or written.
-  const invited = inviteStaffMember(body, catalogue.rows, actor.staffMemberId, actor.tenantId, now);
+  const invited = inviteStaffMember(
+    body,
+    catalogue.rows.map((r) => ({ key: r.key, assignableAtTenantScope: r.assignable_at_tenant_scope })),
+    actor.staffMemberId, actor.tenantId, now);
 
   // ---- AC-4, per pair ----
   const propertiesInTenant = new Set(

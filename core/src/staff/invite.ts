@@ -1,6 +1,6 @@
 import { ulid } from '../ids';
 import { ValidationError } from '../validation';
-import { roleAssignableAtScope, type GrantScope } from './roles';
+import { type GrantScope } from './roles';
 
 export { ValidationError };
 
@@ -118,15 +118,16 @@ const looksLikeEmail = (s: string): boolean =>
   /^[^@\s]+@[^@\s.]+(\.[^@\s.]+)+$/.test(s) && s.length <= MAX_EMAIL;
 
 /**
- * @param catalogue the Tenant's own roles, read from `control_plane.roles`. NOT the
- *   constant in core/src/tenant/provision.ts: Story 1.4 adds custom roles per Tenant,
- *   and a role picker that reads a constant would never show them. Validating against
- *   the Tenant's catalogue also means a role key from ANOTHER Tenant is refused here
- *   rather than by a foreign key at the end of a transaction.
+ * @param catalogue the Tenant's own roles, read from `control_plane.roles` - their
+ *   keys AND whether each may be held Tenant-wide. NOT a constant: Story 1.4 lets a
+ *   Tenant define its own roles and decide that question for them, and a picker or a
+ *   guard reading a constant would never see one. Validating against the Tenant's
+ *   catalogue also means a role key from ANOTHER Tenant is refused here rather than by
+ *   a foreign key at the end of a transaction.
  */
 export function inviteStaffMember(
   input: unknown,
-  catalogue: ReadonlyArray<{ key: string }>,
+  catalogue: ReadonlyArray<{ key: string; assignableAtTenantScope: boolean }>,
   invitedBy: string,
   tenantId: string,
   now: Date,
@@ -174,7 +175,8 @@ export function inviteStaffMember(
   if (!Array.isArray(body.roles) || body.roles.length === 0) {
     throw new ValidationError('an invitation needs at least one Property/role pair');
   }
-  const known = new Set(catalogue.map((r) => r.key));
+  // key -> whether it may be held Tenant-wide, straight from `control_plane.roles`.
+  const known = new Map(catalogue.map((r) => [r.key, r.assignableAtTenantScope === true]));
   const seen = new Set<string>();
   const roles: NormalisedRole[] = [];
   for (const raw of body.roles as unknown[]) {
@@ -195,11 +197,17 @@ export function inviteStaffMember(
     const propertyId = typeof pair.propertyId === 'string' && pair.propertyId.trim()
       ? pair.propertyId.trim() : null;
     const scope: GrantScope = propertyId ? 'property' : 'tenant';
-    if (!roleAssignableAtScope(roleKey, scope)) {
+    // READ FROM THE TENANT'S CATALOGUE, not from a constant. Story 1.3 checked a
+    // hard-coded list of the two shipped roles that may be held Tenant-wide, which was
+    // right until Story 1.4 let a hotel DEFINE one - a custom role marked assignable
+    // Tenant-wide would have been refused by a list it could never appear in. Caught by
+    // running the two stories together, not by the type system: both are `string`.
+    if (scope === 'tenant' && !known.get(roleKey)) {
       throw new ValidationError(
         `${roleKey} must be assigned at a Property: a role granted Tenant-wide applies at every `
-        + 'Property in the Tenant, which is a privilege grant nobody asked for. Only the property '
-        + 'administrator and the corporate viewer may be held Tenant-wide.');
+        + 'Property in the Tenant, which is a privilege grant nobody asked for. A role can be '
+        + 'made assignable Tenant-wide in the role editor (Story 1.4), by somebody who already '
+        + 'holds Tenant-wide authority themselves.');
     }
     // Exact duplicates collapse; the same Property with two different roles does not,
     // because holding both front office and duty manager at one Property is ordinary.

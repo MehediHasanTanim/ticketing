@@ -583,8 +583,34 @@ export interface paths {
          * @description AC-2: the picker offers AT MINIMUM line staff, supervisor, department manager, front office, duty manager, property administrator and corporate viewer. Those seven are seeded per Tenant by Story 1.1, so this reads the Tenant's own roles rather than a constant - which is also what makes Story 1.4's custom roles appear here without changing this operation.
          *
          *     `assignableAtTenantScope` is the part a picker cannot infer: a corporate viewer's authority IS the Tenant (AC-5) and a property administrator may hold either scope, while a line staff role assigned Tenant-wide would be a silent privilege grant across every Property.
+         *
+         *     Since Story 1.4 each role also carries its own PERMISSION SET, stored per Tenant rather than compiled in, plus `editable` and `duplicatedFrom`. A shipped role is duplicable and not editable (FR-81), and a duplicate is independent at creation - which AC-1 requires the interface to say BEFORE the copy is made, not after.
          */
         get: operations["listRoles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/permissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The permission catalogue, and the dependency graph, as data.
+         * @description THE DEPENDENCY GRAPH IS DATA, and this is where the interface reads it. Story 1.4 T1 requires one function, used by both the interface and the server, to decide whether a permission may be enabled - "a hand-written conditional per screen will drift". Serving the graph rather than restating it in the console is what makes that one function possible.
+         *
+         *     `dependsOn` names the permissions that must ALSO be present. Enabling a permission while a dependency is absent is refused server-side and the refusal names the specific dependency (AC-2); the interface disabling the control first is a courtesy, not the control.
+         *
+         *     `class` and `minimumScope` are the two things a role editor cannot infer. `class` decides which credential types can carry the permission at all - a PIN carries `operational` only, whatever role its holder has (FR-4) - and `minimumScope` says whether a grant at one Property confers it or whether only Tenant-wide authority does.
+         */
+        get: operations["listPermissions"];
         put?: never;
         post?: never;
         delete?: never;
@@ -623,6 +649,56 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/roles/{roleKey}/duplicate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Copy a role and edit the copy. Shipped roles are duplicable, never editable.
+         * @description A shipped role is DUPLICABLE BUT NOT EDITABLE, so the baseline Jazzware support can reason about stays intact for every Tenant (FR-81, AC-1). The way to get a hotel's own job title is to copy the nearest shipped role and change the copy.
+         *
+         *     THE COPY IS INDEPENDENT AT CREATION. Its permission set is copied BY VALUE, and later changes to the source do not propagate - deliberately unlike Property settings, which inherit by reference (AD-9, Story 1.2). The two behaviours are different on purpose and share no helper. AC-1 requires the interface to state this **before** the copy is made; `duplicatedFrom` and `independentOfSource` on the result are what a client renders afterwards, and the statement beforehand is a console requirement that the console must carry.
+         *
+         *     Both guards apply here as well as on edit: the copied set is re-validated against the dependency graph, and against what the CALLER themselves holds. Copying a role containing a permission the caller lacks is refused - otherwise duplication would be the way around the escalation guard.
+         */
+        post: operations["duplicateRole"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/roles/{roleKey}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Edit a custom role. The two guards are here.
+         * @description The whole permission set is sent, not a delta: a role's permissions are one fact, and a delta protocol would make "what did this used to be" - which FR-6 requires in the audit trail - a reconstruction rather than a reading.
+         *
+         *     **GUARD 1, ESCALATION (AC-3).** A permission the caller does not themselves hold is refused, server-side, with `details.permission` naming it. Compared against the caller's TENANT-WIDE effective permissions and not their session's: a role is a Tenant-wide object, so authority to write a permission into one has to be Tenant-wide too, or a permission held at one Property becomes a Tenant-wide capability by being written into a definition. Checked FIRST, before the dependency guard, so a failing dependency can never mask an escalation attempt in the audit trail.
+         *
+         *     **GUARD 2, DEPENDENCIES (AC-2).** A permission whose dependency is absent is refused, and `details.unmet` names each permission and the dependency it needs - all of them, not the first, because this operation sends a whole set and fixing them one round trip at a time is a worse interface than the one the criterion asks for.
+         *
+         *     A SHIPPED ROLE IS REFUSED OUTRIGHT (AC-1), at the database as well as here. That includes its Recovery approval threshold: the threshold is part of a role, shipped roles are not editable, so setting one means duplicating first. That is a real consequence of FR-81 rather than an oversight - see the story record.
+         */
+        patch: operations["updateRole"];
         trace?: never;
     };
     "/properties": {
@@ -993,10 +1069,67 @@ export interface components {
         Role: {
             key: string;
             name: string;
-            /** @description Seeded by Story 1.1. False once Story 1.4 adds custom roles. */
+            /** @description Seeded by Story 1.1, one set per Tenant. A shipped role is DUPLICABLE AND NOT EDITABLE, so the baseline Jazzware support can reason about is the same everywhere (FR-81). */
             isShipped: boolean;
-            /** @description Whether this role may be held across the whole Tenant rather than at one Property. True for the property administrator and the corporate viewer; false for every operational role, because a line staff role granted Tenant-wide is a privilege grant nobody asked for. */
+            /** @description The inverse of `isShipped` today, and a separate field on purpose: it is what an interface should read, so that a later reason for a role to be locked - one Jazzware manages, say - does not mean every screen relearns the rule. Never a substitute for the server's refusal (AD-11). */
+            editable: boolean;
+            /**
+             * @description Whether this role may be held across the whole Tenant rather than at one Property. True for the shipped property administrator and corporate viewer; false for every operational role, because a line staff role granted Tenant-wide is a privilege grant nobody asked for.
+             *
+             *     STORED, not derived - a corporate viewer holds only Property-scope permissions and is still Tenant-wide by design (Story 1.3 AC-5), so no derivation from the set can be right. A duplicate copies it from its source like everything else, and it can be changed on a custom role by anyone who already holds Tenant-wide authority, which `role.define` requires anyway.
+             *
+             *     COHERENCE: a role carrying a `tenant`-scope permission MUST be assignable Tenant-wide, or that permission can never be conferred by it. Saving one that is not is refused rather than accepted and quietly inert - "an incoherent role" is what the story exists to prevent.
+             */
             assignableAtTenantScope: boolean;
+            /** @description The role's own set, stored per Tenant since Story 1.4 rather than compiled in. It is always dependency-complete: every permission's `dependsOn` is satisfied within this array, because nothing that is not can be saved. */
+            permissions: string[];
+            /** @description The role this one was copied from, kept for provenance and absent on a shipped role. It is a RECORD, not a link: the copy is independent at creation and later changes to the source do not reach it. */
+            duplicatedFrom?: string;
+            /**
+             * @description Always true, and present in every representation for the same reason `Property.regionImmutable` is: AC-1 requires the interface to state, before a copy is made, that the duplicate will not inherit later changes to its source. A client asked to remember that rule on its own will forget it.
+             * @enum {boolean}
+             */
+            independentOfSource: true;
+            /** @description Minor units, for FR-43. Absent when unset. Story 9.4 owns what it means and builds the approval routing; this story stores it and routes nothing. */
+            recoveryApprovalThreshold?: number;
+            /** Format: date-time */
+            updatedAt?: string;
+        };
+        /** @description One permission, as the role editor needs to understand it. Served rather than restated in the console, so that the dependency rule has exactly one definition (Story 1.4 T1). */
+        PermissionSpec: {
+            key: string;
+            /**
+             * @description Which CREDENTIAL types may carry it. A PIN and a badge carry `operational` only, whatever role their holder has (FR-4) - so a role containing configuration permissions still grants none of them to someone signed in on a Shared Device.
+             * @enum {string}
+             */
+            class: "operational" | "configuration" | "reporting";
+            /**
+             * @description `property` means a grant at one Property confers it. `tenant` means only a Tenant-wide grant does - creating and retiring Properties, and defining roles, are Tenant-level acts.
+             * @enum {string}
+             */
+            minimumScope: "property" | "tenant";
+            /** @description Permissions that must ALSO be present for this one to be enabled. Empty for most. Enabling a permission with an absent dependency is refused and the refusal names the dependency (AC-2). */
+            dependsOn: string[];
+        };
+        DuplicateRoleRequest: {
+            /** @description Stable and never reused: it is what `staff_roles` stores, so renaming a role must not orphan an assignment. Lower-case snake, and a key already in this Tenant - shipped or custom - is a conflict. */
+            key: string;
+            /** @description What the role picker shows. */
+            name: string;
+            /** @description OPTIONAL. Omitted means an exact copy of the source's set, which is the ordinary case. Supplied means copy-then-change in one step, and both guards apply to what is supplied. */
+            permissions?: string[];
+            /** @description Omitted copies the source's value. */
+            assignableAtTenantScope?: boolean;
+            /** @description Minor units, in the Property's currency. Stored here for FR-43 and consumed by Story 9.4, which owns what it MEANS and builds the approval routing - this story stores a number and routes nothing. Omitted leaves it unset, and 9.4 decides what unset means rather than this story guessing. */
+            recoveryApprovalThreshold?: number;
+        };
+        /** @description Every field is optional, and `permissions` is sent WHOLE rather than as a delta - a role's permissions are one fact, and a delta protocol would make FR-6's "previous value" a reconstruction instead of a reading. */
+        UpdateRoleRequest: {
+            name?: string;
+            permissions?: string[];
+            assignableAtTenantScope?: boolean;
+            /** @description Explicit null clears it. */
+            recoveryApprovalThreshold?: number | null;
         };
         /** @description A (Property, role) PAIR - the unit AC-1 asks for, so one Staff Member can hold different roles at different Properties in one Tenant. */
         RoleAssignment: {
@@ -1854,6 +1987,28 @@ export interface operations {
             403: components["responses"]["Error"];
         };
     };
+    listPermissions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description every permission this build knows, ordered by key */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PermissionSpec"][];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
     listStaffMembers: {
         parameters: {
             query?: {
@@ -1906,6 +2061,109 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             /** @description this email address already belongs to a Staff Member in this Tenant */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    duplicateRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The role being copied. May be shipped or custom. */
+                roleKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DuplicateRoleRequest"];
+            };
+        };
+        responses: {
+            /** @description the new, independent role */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Role"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            /** @description The caller lacks `role.define`, or the copy would carry a permission they do not themselves hold. `details.permission` names it. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            404: components["responses"]["Error"];
+            /** @description a role with that key already exists in this Tenant */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    updateRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roleKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateRoleRequest"];
+            };
+        };
+        responses: {
+            /** @description the role as it now stands */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Role"];
+                };
+            };
+            /** @description A dependency is unmet. `details.unmet` is a list of `{ permission, requires }` pairs naming every one. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            401: components["responses"]["Error"];
+            /** @description The caller lacks `role.define`, or the change would grant a permission they do not themselves hold. `details.permission` names it. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            404: components["responses"]["Error"];
+            /** @description this is a shipped role, which is duplicable and not editable */
             409: {
                 headers: {
                     [name: string]: unknown;

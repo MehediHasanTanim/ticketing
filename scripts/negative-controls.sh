@@ -487,6 +487,87 @@ psql "${DATABASE_URL_ADMIN}" -q -c 'GRANT SELECT ON control_plane.invitations TO
 expect_red "the cell has no sight of invitations (FR-1, migration 004)" npx vitest run tests/provisioning.test.ts
 psql "${DATABASE_URL_ADMIN}" -q -c 'REVOKE SELECT ON control_plane.invitations FROM jt_app;' >/dev/null 2>&1
 
+echo "== 36. dependency guard: accept every permission set =="
+# Story 1.4 AC-2. The PRD says this is not a form and the story repeats it: "a dev
+# agent that implements the guards only in the interface has implemented nothing." If
+# the graph stops being evaluated, a role can enable staff.invite with no staff.read -
+# a holder who can add people they cannot see.
+cp core/src/role/define.ts /tmp/define.nc.bak
+python3 - <<'PY2'
+import pathlib
+p = pathlib.Path('core/src/role/define.ts'); t = p.read_text()
+t = t.replace("  const present = new Set(permissions);", "  return [];\n  const present = new Set(permissions);", 1)
+p.write_text(t)
+PY2
+expect_red "permission dependencies are enforced (Story 1.4 AC-2)" npx vitest run tests/unit/role.test.ts
+cp /tmp/define.nc.bak core/src/role/define.ts
+
+echo "== 37. escalation guard: let an administrator grant what they do not hold =="
+# AC-3, and the one that matters most: without it, any holder of role.define can mint
+# a role carrying every permission in the product and assign it to themselves.
+cp core/src/role/define.ts /tmp/define.nc.bak
+python3 - <<'PY2'
+import pathlib
+p = pathlib.Path('core/src/role/define.ts'); t = p.read_text()
+t = t.replace("  for (const permission of requested) {\n    if (!actorHolds.has(permission)) throw new Escalation(permission);",
+              "  for (const permission of requested) {\n    if (false) throw new Escalation(permission);", 1)
+p.write_text(t)
+PY2
+expect_red "no administrator grants a permission they lack (Story 1.4 AC-3)" npx vitest run tests/unit/role.test.ts
+cp /tmp/define.nc.bak core/src/role/define.ts
+
+echo "== 38. duplication by value: share the source array instead of copying it =="
+# T3, and the reason the story says duplication and Property inheritance must not share
+# a helper. By reference, every later edit to a source role would silently rewrite every
+# copy anybody ever made of it - the opposite of what the interface promised before the
+# copy was made.
+cp core/src/role/define.ts /tmp/define.nc.bak
+python3 - <<'PY2'
+import pathlib
+p = pathlib.Path('core/src/role/define.ts'); t = p.read_text()
+t = t.replace("    ? [...source.permissions].sort()", "    ? (source.permissions as string[])", 1)
+p.write_text(t)
+PY2
+expect_red "a duplicate is independent at creation (Story 1.4 T3)" npx vitest run tests/unit/role.test.ts
+cp /tmp/define.nc.bak core/src/role/define.ts
+
+echo "== 39. FR-6: record the new value where the PREVIOUS value belongs =="
+# An audit trail that can disagree with the thing it describes is worse than none,
+# because it will be believed. This is the subtle version of that failure: every field
+# present, every entry written, and "what did this used to be" quietly wrong.
+cp core/src/role/define.ts /tmp/define.nc.bak
+python3 - <<'PY2'
+import pathlib
+p = pathlib.Path('core/src/role/define.ts'); t = p.read_text()
+t = t.replace("        before: {\n          name: existing.name,", "        before: {\n          name: role.name,", 1)
+p.write_text(t)
+PY2
+expect_red "the audit trail records the previous value (FR-6, Story 1.4 AC-4)" npx vitest run tests/unit/role.test.ts
+cp /tmp/define.nc.bak core/src/role/define.ts
+
+echo "== 40. shipped roles: drop the trigger that refuses editing one =="
+# FR-81. The shipped baseline is what Jazzware support can reason about across every
+# Tenant; a hotel that edits it in place has moved the ground under every support
+# conversation. Refused in the aggregate, the handler and here.
+psql "${DATABASE_URL_ADMIN}" -q -c 'DROP TRIGGER roles_shipped_immutable ON control_plane.roles;' >/dev/null 2>&1
+expect_red "a shipped role is never editable, at the database (FR-81)" npx vitest run tests/role.test.ts
+psql "${DATABASE_URL_ADMIN}" -q -c 'CREATE TRIGGER roles_shipped_immutable BEFORE UPDATE OR DELETE ON control_plane.roles FOR EACH ROW EXECUTE FUNCTION control_plane.refuse_shipped_role_change();' >/dev/null 2>&1
+
+echo "== 41. custom roles are real: resolve permissions from the build again =="
+# The seam Story 1.3 left and 1.4 closed. If resolution ever reads a constant instead of
+# the role's stored set, every custom role silently confers NOTHING - staff assigned to
+# one would sign in with no permissions and no error anywhere.
+cp core/src/staff/roles.ts /tmp/roles.nc.bak
+python3 - <<'PY2'
+import pathlib
+p = pathlib.Path('core/src/staff/roles.ts'); t = p.read_text()
+t = t.replace("    for (const key of grant.permissions) {",
+              "    for (const key of (ROLE_PERMISSIONS[grant.roleKey] ?? [])) {", 1)
+p.write_text(t)
+PY2
+expect_red "a custom role confers its own stored permissions (Story 1.4)" npx vitest run tests/unit/staff.test.ts
+cp /tmp/roles.nc.bak core/src/staff/roles.ts
+
 echo
 echo "negative controls: ${pass} correctly went red, ${fail} did not, ${unverified} unverifiable here"
 [ "${fail}" -eq 0 ]

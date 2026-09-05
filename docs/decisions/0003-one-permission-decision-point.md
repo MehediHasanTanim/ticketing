@@ -71,6 +71,46 @@ Property that nobody asked for and no screen would show.
   withholding permissions would add no security while making the isolation gate pass for the
   wrong reason. Story 1.5 removes it.
 
+## Amended by Story 1.4 (2026-09-05)
+
+Story 1.4 changed two things this ADR asserted, and the changes are the point rather
+than a correction:
+
+- **A role's permission set moved out of the build and into the Tenant.** FR-81 lets a
+  hotel duplicate a shipped role and edit the copy, and a copy nobody else's Tenant can
+  see cannot be a constant in a shared build. `ROLE_PERMISSIONS` is now the SHIPPED
+  BASELINE only — what Story 1.1 seeds a new Tenant with, and what migration 009
+  backfilled into every Tenant that already existed. `resolvePermissions` reads each
+  grant's own stored set and stays pure; the grant carries the set, so the whole model
+  is still unit-testable without a database. A unit test parses migration 009 and
+  asserts it agrees with the constant, because drift between the two would surprise one
+  Tenant and not the others.
+- **The unmapped-role diagnostic became an unknown-permission diagnostic.** Reporting a
+  role with no mapping stopped meaning anything the moment a Tenant could define its own.
+  The hazard that replaces it is a stored permission key this build has never heard of —
+  a role written by a newer build, or a permission retired while roles still name it. It
+  confers nothing and it is reported, for the same reason as before.
+
+Story 1.4 also added two guards on top of the decision, both pure and in `core/role/`:
+
+- **Dependencies are data.** Each permission declares `dependsOn`, one function evaluates
+  it, and `GET /v1/permissions` serves the graph so the interface reads the same
+  definition the server enforces. Direct edges only; transitivity follows by induction.
+- **The escalation guard compares against the actor's TENANT-WIDE effective permissions**,
+  not their session's. A role is a Tenant-wide object, so the authority to write a
+  permission into one has to be Tenant-wide too — otherwise a permission held at one
+  Property becomes a Tenant-wide capability by being written into a definition somebody
+  then assigns elsewhere. It is checked BEFORE the dependency guard, so a failing
+  dependency can never mask an escalation attempt in the audit trail.
+
+One consequence worth stating because it is a product decision and not an oversight:
+**a shipped role's Recovery approval threshold cannot be set** (FR-43, AC-4). AC-1 makes
+shipped roles not editable, the threshold is part of a role, so setting one means
+duplicating the role first. That follows from FR-81 as written; if hotels are expected to
+set thresholds on the shipped set without duplicating it, the threshold belongs on a
+Tenant setting keyed by role rather than on the role — which is a change to raise in
+epics.md, not to reinterpret here.
+
 ## Alternatives considered
 
 - **Send the permission set from the client and trust it.** This is the defect AD-11 names.

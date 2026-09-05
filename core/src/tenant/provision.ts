@@ -1,5 +1,6 @@
 import { ulid } from '../ids';
 import { ValidationError } from '../validation';
+import { ROLE_PERMISSIONS, TENANT_ASSIGNABLE_ROLES } from '../staff/roles';
 
 export { ValidationError };
 
@@ -45,7 +46,19 @@ export interface TenantProvisioned {
   recordedAt: string;
   payload: {
     name: string;
-    roles: ReadonlyArray<{ key: string; name: string }>;
+    /**
+     * Each role carries its PERMISSION SET since Story 1.4, because that set now lives
+     * in `control_plane.roles` per Tenant rather than compiled into the build - a
+     * hotel can duplicate a shipped role and edit the copy (FR-81), so the shipped
+     * mapping is a seed and no longer an answer. Recording what was seeded makes the
+     * event the account of what this Tenant actually got, which is the point of
+     * putting it in one event rather than seven writes.
+     */
+    roles: ReadonlyArray<{
+      key: string; name: string;
+      permissions: readonly string[];
+      assignableAtTenantScope: boolean;
+    }>;
     defaults: Record<string, unknown>;
     firstAdministratorInvitationId: string;
   };
@@ -88,7 +101,12 @@ export function provisionTenant(
       recordedAt: stamp,
       payload: {
         name,
-        roles: SHIPPED_ROLES.map((r) => ({ key: r.key, name: r.name })),
+        roles: SHIPPED_ROLES.map((r) => ({
+          key: r.key,
+          name: r.name,
+          permissions: [...(ROLE_PERMISSIONS[r.key] ?? [])].sort(),
+          assignableAtTenantScope: TENANT_ASSIGNABLE_ROLES.includes(r.key),
+        })),
         defaults: { ...PLATFORM_DEFAULTS },
         firstAdministratorInvitationId: invitationId,
       },
