@@ -167,7 +167,27 @@ echo "== 4/5  the suite and the gates =="
 test_result="skipped"
 if [ -f .env ]; then
   set -a; . ./.env; set +a
-  if step npx vitest run; then
+
+  # PREFLIGHT: can the test runner even start?
+  #
+  # The first real run of this step reported "the suite went red" when the suite had
+  # not run at all - vitest could not load its native binding, because npm's
+  # optional-dependency bug (npm/cli#4828) leaves `node_modules` without the binary for
+  # this platform even though the lockfile lists it. The log then carried a stack trace
+  # about `@rolldown/binding-wasm32-wasi` and no indication that the CODE was fine.
+  #
+  # "Your toolchain is incomplete" and "your code is broken" are the two things this
+  # log exists to tell apart, so they get different words and different results.
+  if ! npx vitest --version >/tmp/vitest-preflight.log 2>&1; then
+    if grep -q "Cannot find native binding" /tmp/vitest-preflight.log; then
+      test_result="blocked - vitest's native binding is missing for this platform.
+                Nothing is wrong with the code. Fix it with:
+                    rm -rf node_modules && npm ci
+                (npm bug 4828: an optional platform binary the lockfile lists is not installed.)"
+    else
+      test_result="blocked - vitest will not start:"$'\n'"$(head -3 /tmp/vitest-preflight.log)"
+    fi
+  elif step npx vitest run; then
     if step npm run --silent gates; then test_result="ok"; else test_result="fail (a gate went red)"; fi
   else
     test_result="fail (the suite went red)"
