@@ -257,13 +257,20 @@ ones are:
 These are **not** specified in the PRD, and guessing them in a contract would give a
 guess the authority of a decision:
 
-1. **Token lifetimes.** FR-3 requires access to be lost "at next token validation", which
-   makes the access-token lifetime the *actual* deprovisioning delay — a product decision
-   wearing a technical costume. Story 1.5 must settle it.
-2. **PIN lockout policy.** The contract documents a 429 and rate limiting per device and
-   per staff reference, but no FR states a threshold, a window or a lockout duration. On a
-   shared handset this trades a real security control against a room attendant locked out
-   mid-shift, which is not a call to make in a schema file.
+1. ~~**Token lifetimes.**~~ **CLOSED 2026-09-05 by Story 1.5: the access token lives 15
+   minutes.** That number is the answer to "how long does a dismissed employee keep
+   working", so it is a product commitment under FR-3 rather than a constant to tune —
+   changing it changes what the product promises. Refresh tokens and the session row live
+   8 hours, single-use with chain invalidation. Stated in `contracts/openapi.yaml` beside
+   `/auth/token/refresh` and in `edge/src/session-token.ts`, not in one place only.
+2. ~~**PIN lockout policy.**~~ **CLOSED 2026-09-05: five attempts per fifteen minutes,
+   per device, and NO ACCOUNT LOCKOUT.** The trade was made deliberately: a lockout is
+   stronger against a targeted guess, but on a shared handset it means a room attendant
+   whose PIN a colleague mistyped cannot work until it lifts, and R1 has no self-service
+   unlock. Rate-limiting the device makes guessing expensive without letting one person's
+   fat fingers stop somebody else's shift. Recorded as `LIMITS.devicePin` in
+   `edge/src/rate-limit.ts` so **Story 4.1 inherits a decision rather than making one**.
+   Question 8's durable limiter still applies to it.
 3. **Session listing.** FR-64 requires remote sign-out and device hygiene, which *implies*
    an administrator can see live sessions, but no FR says so. `GET /auth/sessions` is
    modelled as a Property-scoped administrator read; if it is meant to be an audit surface
@@ -339,7 +346,16 @@ guess the authority of a decision:
    would not be safe if it were, so the assumption this story leaves for 4.1 is a **staff
    picker then a PIN** on the Shared Device - the person taps their name, then types the
    PIN. Confirm it there rather than inheriting it silently.
-10. **Nothing delivers an invitation yet.** The AD-8 notification adapter does not exist, so
+10. **SAML 2.0 sign-in needs a reviewed XML signature library.** Settled 2026-09-05:
+    **OIDC now, SAML deferred.** A SAML connection can be configured and is stored, and a
+    SAML sign-in is refused with a reason an administrator sees at connect time rather
+    than at sign-in time. XML signature verification is the most historically broken thing
+    in identity — signature wrapping has defeated implementations written by people who do
+    this for a living — so hand-rolling it in the authentication path would have been worse
+    than not shipping it. Adopting a dependency there is a decision for epics.md, and web
+    access is blocked in this environment, so its current advisories cannot even be read
+    from here.
+11. **Nothing delivers an invitation yet.** The AD-8 notification adapter does not exist, so
     a set-up link and a reset link are written to `control_plane.outbox` and go no further.
     Story 1.3's suite reads them the way that adapter will. Until it is built, a real
     administrator cannot complete a sign-up without someone reading that table - which is a

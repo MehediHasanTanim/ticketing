@@ -248,7 +248,7 @@ const assertLanguage = (v: unknown): string => {
   return tag;
 };
 
-async function openSession(
+export async function openSession(
   client: PoolClient,
   p: { tenantId: string; staffMemberId: string; credentialType: 'sso' | 'password' | 'pin' | 'badge'; languageTag: string },
   rowTtlMs: number,
@@ -581,7 +581,38 @@ export async function handleSwitchContext(
 }
 
 export const invitationTtlMs = INVITATION_TTL_MS;
+export const sessionRowTtlMs = SESSION_ROW_TTL_MS;
 export { revokeSessions };
+
+/**
+ * A refresh token, issued alongside a session (Story 1.5).
+ *
+ * SINGLE-USE WITH CHAIN INVALIDATION. Presenting one twice means it is no longer in
+ * only one place, so the whole chain dies rather than just the replayed link - the
+ * alternative leaves whoever stole it holding a working credential. `chainId` is what
+ * makes that one statement rather than a walk.
+ *
+ * Only the hash is stored, as everywhere else. Absent for PIN and badge sessions,
+ * which end at the inactivity timeout and return the handset to its sign-in screen
+ * rather than holding a long-lived credential on a device left in a corridor.
+ */
+export async function issueRefreshToken(
+  client: PoolClient,
+  facts: { sessionId: string; tenantId: string; staffMemberId: string },
+  now: Date,
+  chainId?: string,
+): Promise<string> {
+  const token = generateOneTimeToken();
+  const id = ulid(now);
+  await client.query(
+    `INSERT INTO control_plane.refresh_tokens
+       (id, chain_id, session_id, tenant_id, staff_member_id, token_hash, issued_at, expires_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [id, chainId ?? id, facts.sessionId, facts.tenantId, facts.staffMemberId,
+     hashOneTimeToken(token), now.toISOString(),
+     new Date(now.getTime() + SESSION_ROW_TTL_MS).toISOString()]);
+  return token;
+}
 
 /**
  * A Staff Member belongs to a Tenant and holds roles at zero or more Properties, so

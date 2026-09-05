@@ -339,6 +339,8 @@ export interface paths {
         /**
          * Exchange a refresh token for a new short-lived access token.
          * @description This is the mechanism behind "access is lost at next token validation, without a manual step in JazzTicketing" (Story 1.5 AC-2): upstream state is re-checked HERE. Access tokens are therefore deliberately short-lived, and the refresh is where deprovisioning bites. A deprovisioned, disabled or revoked identity gets `unauthenticated` and the refresh token is burned. Rotation is single-use - presenting the same refresh token twice invalidates the whole session chain, because a replay means the token is no longer in only one place. Body, never a URL; never logged.
+         *
+         *     LIFETIME SETTLED 2026-09-05: the access token lives **15 minutes**, and that number is the answer to "how long does a deprovisioned identity keep working" - a product commitment under FR-3, not a tuning constant. Changing it changes what the product promises, so it is stated here and in ADR 0002 rather than left in a module somebody tunes.
          */
         post: operations["refreshToken"];
         delete?: never;
@@ -566,6 +568,40 @@ export interface paths {
          */
         post: operations["resetStaffMfa"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/identity-provider": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The Tenant's identity connection, without its secret.
+         * @description NO SECRET IS EVER RETURNED, and none is stored in this row: the connection holds a REFERENCE into the platform secret store, and the value is resolved at the moment it is used. An administration screen that can display a client secret is a screen that can leak one.
+         */
+        get: operations["getIdentityProvider"];
+        /**
+         * Connect or reconfigure this Tenant's identity provider.
+         * @description IDEMPOTENT, hence PUT: a Tenant has at most one connection, and reconfiguring it is the same act as connecting it. Recorded either way with the actor and the previous value (FR-6), because changing where a Tenant's people authenticate is among the most consequential things an administrator can do.
+         *
+         *     **JUST-IN-TIME PROVISIONING IS OFF BY DEFAULT** (FR-83), and that is a security decision rather than a preference: authentication is not authorisation. Omitting `justInTimeProvisioning` leaves it off; turning it on is an audited Tenant-level change. With it off, an identity that authenticates successfully but matches no provisioned Staff Member gets `forbidden` and NO SESSION - not a session holding an empty permission set, which every client would then have to remember to handle.
+         *
+         *     SAML 2.0 connections are ACCEPTED AND STORED, and a SAML sign-in is refused until a reviewed XML signature library is adopted - see the story record. XML signature verification is the most historically broken thing in identity (signature wrapping), and hand-rolling it in the auth path would be worse than not shipping it.
+         */
+        put: operations["connectIdentityProvider"];
+        post?: never;
+        /**
+         * Disconnect the provider. Existing sessions are revoked.
+         * @description Disconnecting REVOKES every session that was opened through the provider, and leaves password and PIN credentials alone. The alternative - letting SSO sessions run to their natural expiry - would mean a Tenant that disconnected a compromised provider still had people signed in through it.
+         *
+         *     The connection row is kept and marked inactive rather than deleted, so the audit trail still resolves what a past session authenticated against.
+         */
+        delete: operations["disconnectIdentityProvider"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1095,6 +1131,39 @@ export interface components {
             /** Format: date-time */
             updatedAt?: string;
         };
+        /** @description A Tenant's connection, as an administrator may see it. No client secret, no signing key, no assertion - the row holds a reference into the platform secret store and this representation does not even hold that. */
+        IdentityConnection: {
+            connected: boolean;
+            /** @enum {string} */
+            protocol?: "oidc" | "saml";
+            /** @description The provider's issuer identifier, matched against the `iss` claim on every token. */
+            issuer?: string;
+            clientId?: string;
+            /** @description FR-83. False unless a Tenant deliberately turned it on, and turning it on is an audited change. With it off, authenticating proves who somebody is and grants them nothing. */
+            justInTimeProvisioning: boolean;
+            /** @description Where this Tenant's people begin. Contains the Tenant's slug, which is a ROUTING HINT and not a credential - it identifies which provider to redirect to and confers nothing on its own. */
+            signInUrl?: string;
+            /** @description False for a stored SAML connection, which can be configured but cannot yet complete a sign-in. `unavailableReason` says why, so an administrator finds out when they connect it rather than when their people cannot get in. */
+            signInAvailable?: boolean;
+            unavailableReason?: string;
+            active?: boolean;
+            /** Format: date-time */
+            updatedAt?: string;
+        };
+        ConnectIdentityProviderRequest: {
+            /** @enum {string} */
+            protocol: "oidc" | "saml";
+            /** @description An https URL. OIDC discovery is performed against it, so the endpoints are read from the provider rather than typed by an administrator who would otherwise have to keep them current. */
+            issuer: string;
+            clientId: string;
+            /** @description A NAME IN THE PLATFORM SECRET STORE, never the secret itself. The value is resolved at the moment it is used and never stored, returned or logged. Refusing to accept the secret over this API is deliberate: a value that never enters the system cannot leak from it. */
+            clientSecretRef: string;
+            /**
+             * @description FR-83, off unless deliberately enabled. Omitted means off; there is no configuration in which it defaults on.
+             * @default false
+             */
+            justInTimeProvisioning: boolean;
+        };
         /** @description One permission, as the role editor needs to understand it. Served rather than restated in the console, so that the dependency rule has exactly one definition (Story 1.4 T1). */
         PermissionSpec: {
             key: string;
@@ -1507,14 +1576,21 @@ export interface operations {
             /** @description redirect to the identity provider */
             302: {
                 headers: {
-                    /** @description the provider's authorisation endpoint */
+                    /** @description The provider's authorisation endpoint, carrying `state` and a PKCE `code_challenge` (S256). No secret and no token appears in it. */
                     Location?: string;
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            400: components["responses"]["Error"];
-            501: components["responses"]["NotImplemented"];
+            /** @description ONE answer for every reason this cannot proceed - unknown Tenant, no connection, an inactive one - so the endpoint cannot be used to discover which Tenants exist or which have SSO. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
         };
     };
     completeSso: {
@@ -1542,7 +1618,6 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
-            501: components["responses"]["NotImplemented"];
         };
     };
     setUpCredential: {
@@ -1679,7 +1754,6 @@ export interface operations {
             };
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
-            501: components["responses"]["NotImplemented"];
         };
     };
     signInOnSharedDevice: {
@@ -1963,6 +2037,78 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             501: components["responses"]["NotImplemented"];
+        };
+    };
+    getIdentityProvider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description the connection, or `connected: false` when there is none */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityConnection"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    connectIdentityProvider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectIdentityProviderRequest"];
+            };
+        };
+        responses: {
+            /** @description the connection as it now stands */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityConnection"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    disconnectIdentityProvider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description disconnected, with the number of sessions revoked */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityConnection"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     listRoles: {

@@ -41,6 +41,20 @@ export const LIMITS = {
   credentialSetUp: { max: 10, windowMs: 5 * 60 * 1000 },
   passwordForgot: { max: 5, windowMs: 15 * 60 * 1000 },
   passwordReset: { max: 10, windowMs: 15 * 60 * 1000 },
+  /**
+   * THE PIN POLICY, SETTLED 2026-09-05 (ADR 0002 question 2), recorded here so Story
+   * 4.1 inherits a decision rather than picking a number.
+   *
+   * Five attempts in fifteen minutes, per device, and **NO ACCOUNT LOCKOUT**. The trade
+   * is explicit: a lockout is stronger against a targeted guess, but on a shared handset
+   * it means a room attendant whose PIN a colleague mistyped cannot work until it lifts,
+   * and there is no self-service unlock in R1. Rate-limiting the DEVICE makes guessing
+   * expensive without letting one person's fat fingers stop somebody else's shift.
+   *
+   * Nothing consumes this yet - Story 4.1 owns the sign-in flow - and it lives here
+   * rather than in that story's future code so the decision is not made twice.
+   */
+  devicePin: { max: 5, windowMs: 15 * 60 * 1000 },
 } as const satisfies Record<string, Limit>;
 
 export interface Verdict { allowed: boolean; retryAfterSeconds: number }

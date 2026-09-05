@@ -74,6 +74,10 @@ export const PERMISSIONS = {
   // is "duplicate a shipped role and edit the copy", one act in two steps, and a
   // hotel that may do half of it can produce a copy it cannot then correct.
   'role.define': { class: 'configuration', minimumScope: 'tenant', dependsOn: ['role.read'] },
+  // Story 1.5. Connecting an identity provider decides where a Tenant's people
+  // authenticate, for the whole Tenant - so it is Tenant-scope, and it depends on
+  // nothing: it is not a deeper form of any other permission.
+  'identity.manage': { class: 'configuration', minimumScope: 'tenant', dependsOn: [] },
 } as const satisfies Record<string, PermissionSpec>;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -107,7 +111,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<string, readonly Permission[]>> =
   duty_manager: ['property.read'],
   property_administrator: [
     'property.read', 'property.create', 'property.deactivate', 'property.setup.read',
-    'staff.read', 'staff.invite', 'role.read', 'role.define',
+    'staff.read', 'staff.invite', 'role.read', 'role.define', 'identity.manage',
   ],
   // A VIEWER: reads, never writes. Its authority is the Tenant (AC-5), which is why
   // it is one of the two roles assignable Tenant-wide.

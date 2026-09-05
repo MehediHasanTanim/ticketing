@@ -1,6 +1,6 @@
 # Story 1.5: Connect a Tenant identity provider
 
-Status: ready-for-dev
+Status: review
 
 <!-- Created by bmad-create-story 2026-09-02. Story statement and acceptance criteria are transcribed verbatim from planning-artifacts/epics.md (status: final) - do not reword them here; a story needing a different criterion is a change to raise in epics.md. Epic 1: Property go-live foundation. -->
 
@@ -96,10 +96,126 @@ New: `adapters/identity/` — the only place a provider SDK or protocol type exi
 
 ### Agent Model Used
 
-_(to be filled by the dev agent)_
+claude-opus-5 (Cowork, remote session linked to tanim-m4-pro-local). Contracts first,
+then migration 010, then the port and adapter, then `app/`, `edge/`, tests, gates.
 
 ### Debug Log References
 
+`.dev-refresh.log` on the Mac. Additionally verified by execution in this session's
+cloud container against a real Postgres 16 and a real in-process OIDC provider.
+
 ### Completion Notes List
 
+**The two open questions were raised, not picked, and Tanim settled them on 2026-09-05.**
+The access token lives **15 minutes** - that number is the answer to "how long does a
+dismissed employee keep working", so it is a product commitment under FR-3 rather than a
+constant to tune. The PIN policy is **five attempts per fifteen minutes per device with
+no account lockout**: a lockout is stronger against a targeted guess, but on a shared
+handset it means a room attendant whose PIN a colleague mistyped cannot work until it
+lifts, and R1 has no self-service unlock. Both are recorded in ADR 0002 and in the code
+that enforces them, and `LIMITS.devicePin` exists so **Story 4.1 inherits a decision
+rather than making one**.
+
+**A third question I would not decide alone: SAML.** XML signature verification is the
+most historically broken thing in identity - signature wrapping has defeated
+implementations written by people who do this for a living - and hand-rolling it in the
+authentication path would be worse than not shipping it. Settled: **OIDC now, SAML
+deferred**. A SAML connection is accepted and stored, and a SAML sign-in is refused with
+a reason the administrator sees **when they connect it**, not when their people cannot
+get in. AC-1 says "configure a SAML 2.0 or OIDC connection" and configuring works; the
+sign-in half is raised as ADR 0002 question 10.
+
+**OIDC is built end to end and verified against a real provider.**
+`tests/fake-identity-provider.ts` is an in-process OIDC provider with a genuine RSA
+keypair serving a genuine discovery document and JWKS, so the adapter verifies real
+signatures rather than agreeing with a mock - a mocked verifier only proves that our code
+calls our code. Discovery, PKCE (S256), code exchange, and ID-token verification of
+signature, `iss`, `aud`, `exp`, `iat` and `nonce`. `alg: none` and HS* are refused
+outright rather than handled: accepting an algorithm the TOKEN chooses is how JWT
+verification is defeated.
+
+**AC-2's mechanism is an upstream refresh grant.** Our refresh asks the provider to
+honour its own refresh token; a deprovisioned account gets `invalid_grant`, and there is
+nothing to poll, sweep or reconcile. That requires holding a provider credential we must
+PRESENT rather than compare, so it is the one value in this schema stored **encrypted**
+(AES-256-GCM) rather than hashed - stated in `secret-box.ts` so nobody later "tidies" it
+into a hash and quietly breaks deprovisioning. **An unreachable provider is not a
+deprovisioning**: an outage must not sign out a hotel's entire management team mid-shift,
+so unreachable answers 503 and keeps the session while refused answers 401 and ends it.
+
+**FR-83 is enforced in three places and defaulted in two.** Off in the aggregate, off in
+the column default, and a successful authentication that maps to no Staff Member gets
+**403 and no session** - not a session with an empty permission set, which every client
+would then have to remember to handle and which would read as a bug rather than a policy.
+The attempt is written to the audit trail, because an administrator wondering why a new
+starter cannot get in needs to see that they authenticated successfully.
+
+**A client secret cannot enter this system.** The API refuses the field rather than
+ignoring it, the column holds a secret-store REFERENCE, and the value is resolved at the
+moment of use through one function. That is the strongest reading of "secrets from the
+platform secret store": a value that never arrives cannot leak. When a real store is
+adopted, `adapters/src/identity/secret-store.ts` changes and nothing else does.
+
+**The fixture stub's production path is removed**, which the story's prerequisite note
+asked for. Two independent refusals - `NODE_ENV=production` switches the resolver off
+whatever `FIXTURE_AUTH` says, and `main.ts` refuses to start on that combination - because
+the one that matters is the one nobody remembers to set.
+
+**THE DEFECT THE SUITE FOUND, and it was the same one three times.** Every refusal on the
+SSO and refresh paths has side effects that must survive it: the single-use state is
+consumed so it cannot be retried, a replayed refresh chain is burned, a deprovisioned
+session is revoked, and the attempt is recorded. **Throwing to signal the refusal also
+aborted the transaction that carried all of that** - so a refused sign-in left no trace, a
+single-use state stayed reusable, and a session revoked for being deprovisioned was still
+live on the very next request. Three tests failed for one cause. Refusals are now returned
+as verdicts and the edge maps them, so the transaction commits. Negative control 47 puts a
+throw back and proves the suite goes red.
+
+**A note on the loopback exception.** The connection model requires https, with one
+exception: `http` on the literal loopback address. That is a real rule rather than a test
+concession - on 127.0.0.1 the packets never leave the host, which is the same reasoning
+RFC 8252 uses for native apps - and `localhost` is deliberately NOT included, because it
+is a name and names resolve.
+
+**Story 1.4's immutability trigger had its first real exercise.** `identity.manage` had to
+join the shipped property administrator, and 1.4's trigger refuses that for every
+connection with no owner exemption. Migration 010 drops the trigger, makes the change
+where somebody reviews it, and puts the trigger back - which is exactly what 1.4's comment
+said changing the baseline would mean. The drift test that compares the constant to the
+migrations was generalised to read every migration in order and take the last statement
+per role, so 010 amending 009 is the normal case rather than a failure.
+
+**VERIFIED BY EXECUTION.** Both migration paths against a real Postgres 16 - 010 applied
+on top of an already-migrated 001-009 database, and all ten from scratch. **203/203 tests
+each way, and 46 of 48 negative controls red-verified** (0 failures, 1 unverifiable - the
+Dart half, no SDK; 1 skipped - console dependencies). All seven new controls go red on
+demand. Not a substitute for `npm run refresh` on the Mac.
+
 ### File List
+
+**New**
+
+- `ops/migrations/010_identity_provider.sql`
+- `core/src/ports/identity.ts` - the authenticated-subject value object; no protocol type
+- `core/src/identity/connection.ts` - validation, the slug, the return-path allowlist
+- `adapters/src/identity/oidc.ts` - the only place a JWT exists
+- `adapters/src/identity/secret-store.ts` - one function, one seam
+- `adapters/src/crypto/secret-box.ts` - AES-256-GCM for the one value we must present
+- `app/src/identity/connect.ts`, `app/src/identity/sso.ts`
+- `tests/fake-identity-provider.ts`, `tests/identity.test.ts`, `tests/unit/identity.test.ts`
+
+**Changed**
+
+- `contracts/openapi.yaml` - `GET/PUT/DELETE /identity-provider`; `IdentityConnection` and
+  `ConnectIdentityProviderRequest`; the three SSO operations flipped to built
+- `core/src/staff/roles.ts` - `identity.manage`
+- `core/src/tenant/provision.ts`, `app/src/tenant/provision-tenant.ts` - the Tenant slug
+- `app/src/staff/sessions.ts` - `issueRefreshToken`, `openSession` exported
+- `edge/src/server.ts` - the SSO and connection routes; refusal verdicts mapped
+- `edge/src/auth.ts`, `edge/src/main.ts` - the stub's production path removed
+- `edge/src/rate-limit.ts` - the settled PIN policy, for Story 4.1
+- `docs/decisions/0002-...md` - questions 1 and 2 closed; SAML raised as question 10
+- `tests/unit/role.test.ts` - the drift test reads every migration in order
+- `tests/unit/tenant.test.ts`, `tests/smoke.test.ts`, `tests/harness.ts`
+- `scripts/negative-controls.sh` - controls 42-48
+- `.env.example`, `docker-compose.yml`

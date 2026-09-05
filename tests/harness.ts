@@ -26,6 +26,10 @@ export async function start(): Promise<Harness> {
   // suite set them alike it would pass while proving nothing about the separation
   // the three surfaces depend on.
   process.env.SESSION_TOKEN_SECRET ??= 'suite-staff-session-secret-not-real';
+  // Story 1.5. A fourth distinct value: encrypting provider refresh tokens with the
+  // same key that signs sessions would make one compromise into two.
+  process.env.UPSTREAM_TOKEN_KEY ??= 'suite-upstream-token-key-not-a-real-one';
+  process.env.SSO_REDIRECT_URI ??= 'http://127.0.0.1:8081/auth/callback';
   const server: Server = createApp();
   await new Promise<void>((res) => server.listen(0, '127.0.0.1', () => res()));
   const addr = server.address();

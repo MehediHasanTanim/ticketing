@@ -46,8 +46,18 @@ export function mintFixtureToken(p: { tenantId: string; propertyId?: string; sta
  * Decodes and verifies, and says nothing about scope. Both resolvers below build on
  * it so that the signature check exists once.
  */
+export const fixtureStubEnabled = (): boolean =>
+  process.env.FIXTURE_AUTH === '1' && process.env.NODE_ENV !== 'production';
+
 function verified(authorization: string | undefined): { tenantId?: string; propertyId?: string; staffMemberId?: string } | undefined {
-  if (process.env.FIXTURE_AUTH !== '1') return undefined;
+  // STORY 1.5 REMOVED THE PRODUCTION PATH, which is what its prerequisite note asked
+  // for: corporate users now sign in through their Tenant's provider, so the stub is
+  // no longer how anybody reaches this product. It survives only as Story 1.0's
+  // isolation-gate fixture, and `NODE_ENV=production` now switches it off no matter
+  // what `FIXTURE_AUTH` says. `main.ts` refuses to start on that combination as well -
+  // two independent refusals, because the one that matters is the one nobody remembers
+  // to set.
+  if (!fixtureStubEnabled()) return undefined;
   if (!authorization?.startsWith('Bearer ')) return undefined;
   const token = authorization.slice('Bearer '.length);
   const [body, sig] = token.split('.');

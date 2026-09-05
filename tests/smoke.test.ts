@@ -189,7 +189,9 @@ describe('cell smoke test', () => {
     // be a deliberate edit rather than a silent one. Twenty until Story 1.3, which
     // built six: /auth/session, /auth/context, /auth/sign-in,
     // /auth/credential/set-up, /auth/password/forgot and /auth/password/reset.
-    expect(unbuilt).toHaveLength(14);
+    // Fourteen until Story 1.5, which built three: /auth/sso/start,
+    // /auth/sso/callback and /auth/token/refresh.
+    expect(unbuilt).toHaveLength(11);
     expect(unbuilt.every((o) => o.path.startsWith('/auth/'))).toBe(true);
 
     // And the converse, which is the assertion that actually bites: an operation

@@ -38,9 +38,20 @@ describe('provisioning a Tenant (Story 1.1, FR-1)', () => {
     // /propert/ and failed on `property_administrator`, which is a shipped role
     // name and exactly right. A test that cannot tell a role from a Property is
     // not testing what it claims to.
+    // `slug` joined this list in Story 1.5: it is the routing hint
+    // `GET /auth/sso/start?tenantSlug=` needs in order to choose a provider before any
+    // credential exists. Not a Property and not a credential - it confers nothing, and
+    // that endpoint answers identically whether or not it resolves.
     expect(Object.keys(event.payload).sort()).toEqual(
-      ['defaults', 'firstAdministratorInvitationId', 'name', 'roles']);
+      ['defaults', 'firstAdministratorInvitationId', 'name', 'roles', 'slug']);
     expect(Object.keys(event.payload.defaults).sort()).toEqual(['locale', 'mfaRequired']);
+  });
+
+  it('derives a slug from the name, so a Tenant is addressable before it has a credential', () => {
+    const { event, slug } = provisionTenant(
+      { name: 'Seaside Group', firstAdministratorEmail: 'gm@seaside.test' }, AT, fixedRand);
+    expect(slug).toBe('seaside-group');
+    expect(event.payload.slug).toBe('seaside-group');
   });
 
   it('seeds the platform defaults, including MFA off (FR-85)', () => {

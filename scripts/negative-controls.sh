@@ -568,6 +568,114 @@ PY2
 expect_red "a custom role confers its own stored permissions (Story 1.4)" npx vitest run tests/unit/staff.test.ts
 cp /tmp/roles.nc.bak core/src/staff/roles.ts
 
+echo "== 42. JIT off by default: default it ON =="
+# FR-83, and the story is explicit that this is a security decision rather than a
+# preference. If the default ever flips, every identity in a connected directory becomes
+# an account here - which is the difference between authentication and authorisation.
+cp core/src/identity/connection.ts /tmp/conn.nc.bak
+python3 - <<'PY2'
+import pathlib
+p = pathlib.Path('core/src/identity/connection.ts'); t = p.read_text()
+t = t.replace("    justInTimeProvisioning: body.justInTimeProvisioning === true,",
+              "    justInTimeProvisioning: body.justInTimeProvisioning !== false,", 1)
+p.write_text(t)
+PY2
+expect_red "just-in-time provisioning is off by default (FR-83)" npx vitest run tests/unit/identity.test.ts
+cp /tmp/conn.nc.bak core/src/identity/connection.ts
+
+echo "== 43. open redirect: accept any returnTo =="
+# `returnTo` is where a browser lands after signing in, so it is exactly the shape an
+# open redirect takes. The cases that matter are the ones that LOOK like paths -
+# //evil.test is protocol-relative and a browser resolves it to another origin.
+cp core/src/identity/connection.ts /tmp/conn.nc.bak
+python3 - <<'PY2'
+import pathlib
+p = pathlib.Path('core/src/identity/connection.ts'); t = p.read_text()
+t = t.replace("  if (!candidate.startsWith('/')) return undefined;",
+              "  return candidate;\n  if (!candidate.startsWith('/')) return undefined;", 1)
+p.write_text(t)
+PY2
+expect_red "no open redirect on the sign-in route (Story 1.5)" npx vitest run tests/unit/identity.test.ts
+cp /tmp/conn.nc.bak core/src/identity/connection.ts
+
+echo "== 44. the API takes a secret reference, not a secret =="
+# The strongest form of "secrets live in the platform secret store": a value that never
+# enters the system cannot leak from it. If this API starts accepting a client secret,
+# it will end up in a request log, an audit entry or an administration screen.
+cp core/src/identity/connection.ts /tmp/conn.nc.bak
+python3 - <<'PY2'
+import pathlib
+p = pathlib.Path('core/src/identity/connection.ts'); t = p.read_text()
+t = t.replace("    if (!ALLOWED_KEYS.has(key)) {", "    if (false) {", 1)
+p.write_text(t)
+PY2
+expect_red "a client secret is refused over the API (Story 1.5 T1)" npx vitest run tests/unit/identity.test.ts
+cp /tmp/conn.nc.bak core/src/identity/connection.ts
+
+echo "== 45. id token verification: accept whatever algorithm the token names =="
+# `alg: none` and HS* are how JWT verification is defeated - a symmetric algorithm turns
+# the provider's PUBLIC key into a signing key anybody can use. The adapter accepts
+# asymmetric signatures from published keys or it accepts nothing.
+cp adapters/src/identity/oidc.ts /tmp/oidc.nc.bak
+python3 - <<'PY2'
+import pathlib
+p = pathlib.Path('adapters/src/identity/oidc.ts'); t = p.read_text()
+t = t.replace("const ALLOWED_ALGS = new Set(['RS256', 'RS384', 'RS512', 'ES256', 'ES384']);",
+              "const ALLOWED_ALGS = new Set(['RS256', 'RS384', 'RS512', 'ES256', 'ES384', 'none', 'HS256']);", 1)
+p.write_text(t)
+PY2
+expect_red "the id token algorithm is ours to choose, not the token's" \
+  node -e '
+    const src = require("fs").readFileSync("adapters/src/identity/oidc.ts", "utf8");
+    // A structural control: the allowlist must contain no symmetric or empty algorithm.
+    if (/["\x27](none|HS(256|384|512))["\x27]/.test(src)) {
+      console.error("the allowlist admits an algorithm that defeats verification");
+      process.exit(1);
+    }
+    process.exit(0);'
+cp /tmp/oidc.nc.bak adapters/src/identity/oidc.ts
+
+echo "== 46. deprovisioning: stop asking the provider whether the identity stands =="
+# AC-2. Without the upstream check, "access is lost at next token validation" becomes a
+# sentence in a document: our own refresh would happily mint a new access token for
+# somebody the hotel dismissed a week ago.
+cp app/src/identity/sso.ts /tmp/sso.nc.bak
+python3 - <<'PY2'
+import pathlib
+p = pathlib.Path('app/src/identity/sso.ts'); t = p.read_text()
+t = t.replace("  if (row!.credential_type === 'sso') {", "  if (false) {", 1)
+p.write_text(t)
+PY2
+expect_red "a deprovisioned identity loses access at next validation (AC-2, FR-3)" \
+  npx vitest run tests/identity.test.ts
+cp /tmp/sso.nc.bak app/src/identity/sso.ts
+
+echo "== 47. a refusal must not roll back what it recorded =="
+# The defect the suite found: throwing to signal a refusal ALSO aborted the transaction
+# that consumed the single-use state, burned a replayed refresh chain and wrote the
+# audit entry - so a refused sign-in left no trace and a revoked session was still live.
+cp app/src/identity/sso.ts /tmp/sso.nc.bak
+python3 - <<'PY2'
+import pathlib
+p = pathlib.Path('app/src/identity/sso.ts'); t = p.read_text()
+t = t.replace("    return generic;\n  }\n  if (token!.expires_at",
+              "    throw new Unauthenticated('that refresh token is not valid');\n  }\n  if (token!.expires_at", 1)
+p.write_text(t)
+PY2
+expect_red "a replayed refresh chain stays burned (Story 1.5)" npx vitest run tests/identity.test.ts
+cp /tmp/sso.nc.bak app/src/identity/sso.ts
+
+echo "== 48. the fixture stub has no production path =="
+# Story 1.5's prerequisite: corporate users sign in through their Tenant's provider now,
+# so the Story 1.0 stub is no longer how anybody reaches this product. Two independent
+# refusals - the resolver and the boot check - because the one that matters is the one
+# nobody remembers to set.
+expect_red "the fixture stub refuses to run in production (Story 1.5)" \
+  env FIXTURE_AUTH=1 NODE_ENV=production node -e '
+    const { fixtureStubEnabled } = require("./dist/edge/src/auth.js");
+    if (fixtureStubEnabled()) { console.error("the stub is live with NODE_ENV=production"); process.exit(0); }
+    process.exit(1);'
+
 echo
 echo "negative controls: ${pass} correctly went red, ${fail} did not, ${unverified} unverifiable here"
 [ "${fail}" -eq 0 ]

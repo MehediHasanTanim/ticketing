@@ -4,6 +4,7 @@ import { closePool } from '../../adapters/src/postgres/pool';
 import { fixtureSecretOrThrow } from './auth';
 import { controlPlaneSecretOrThrow, CONTROL_PLANE_ENABLED } from './control-plane/operator-auth';
 import { sessionSecretOrThrow } from './session-token';
+import { upstreamTokenKeyOrThrow } from '../../adapters/src/crypto/secret-box';
 
 /**
  * Configuration is checked BEFORE the listener opens, so a missing secret is a
@@ -15,6 +16,19 @@ import { sessionSecretOrThrow } from './session-token';
 const assertSecretsPresent = (): void => {
   if (process.env.FIXTURE_AUTH === '1') fixtureSecretOrThrow();
   if (CONTROL_PLANE_ENABLED) controlPlaneSecretOrThrow();
+  // Story 1.5: the stub is a Story 1.0 fixture and has no production path any more.
+  // Refusing to START is the loud half of that; `edge/src/auth.ts` refusing to resolve
+  // is the quiet half, and neither relies on the other.
+  if (process.env.FIXTURE_AUTH === '1' && process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'FIXTURE_AUTH=1 with NODE_ENV=production. The fixture credential is Story 1.0\'s '
+      + 'isolation-gate stub and Story 1.5 removed its production path: corporate users '
+      + 'sign in through their Tenant\'s identity provider now. Unset FIXTURE_AUTH.');
+  }
+  // Story 1.5: encrypts the provider refresh tokens that make deprovisioning take
+  // effect. Required only where a provider can actually be connected, which is
+  // everywhere the control plane is - so, unconditionally.
+  upstreamTokenKeyOrThrow();
   // Story 1.3: a cell signs every staff session with this, so it is unconditional.
   // Each check is a SEPARATE call for a reason worth remembering - when these were
   // folded together, the first failure masked the others and all the failure cases

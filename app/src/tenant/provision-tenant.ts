@@ -34,9 +34,17 @@ export async function handleProvisionTenant(
 ): Promise<ProvisionResult> {
   const { event, tenantId, invitationId } = provisionTenant(cmd, now);
 
+  // The slug is generated from the name and disambiguated by the Tenant's own id when
+  // two hotels choose the same one - which they will. Resolved here rather than in the
+  // aggregate because uniqueness is a question only the store can answer, and a pure
+  // function that needed the store would not be pure.
+  let slug = event.payload.slug;
+  const taken = await client.query('SELECT 1 FROM control_plane.tenants WHERE slug = $1', [slug]);
+  if ((taken.rowCount ?? 0) > 0) slug = `${slug}-${tenantId.slice(-6).toLowerCase()}`;
+
   await client.query(
-    'INSERT INTO control_plane.tenants (id, name, created_at) VALUES ($1, $2, $3)',
-    [tenantId, event.payload.name, now.toISOString()],
+    'INSERT INTO control_plane.tenants (id, name, slug, created_at) VALUES ($1, $2, $3, $4)',
+    [tenantId, event.payload.name, slug, now.toISOString()],
   );
 
   // FR-1: creating a Tenant seeds the shipped role set and platform defaults, and

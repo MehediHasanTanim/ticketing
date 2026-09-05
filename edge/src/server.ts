@@ -26,6 +26,14 @@ import {
 } from '../../app/src/staff/invite-staff-member';
 import type { Permission } from '../../core/src/staff/roles';
 import {
+  getIdentityProvider, handleConnectIdentityProvider, handleDisconnectIdentityProvider,
+} from '../../app/src/identity/connect';
+import {
+  handleSsoStart, handleSsoCallback, handleRefresh, SsoUnavailable,
+} from '../../app/src/identity/sso';
+import { oidcProvider } from '../../adapters/src/identity/oidc';
+import { SecretUnavailable } from '../../adapters/src/identity/secret-store';
+import {
   handleDuplicateRole, handleUpdateRole, listPermissions,
   ShippedRoleImmutable, RoleKeyTaken, Escalation, DependencyUnmet,
 } from '../../app/src/role/manage';
@@ -334,6 +342,76 @@ export function createApp(): Server {
         return res.end();
       }
 
+      // ---- sign-in through the Tenant's identity provider (Story 1.5) ----
+      // Public, like the password fallback and for the same reason: these are how a
+      // caller OBTAINS a credential, so demanding one would be circular.
+      if (readMethod && url.pathname === '/v1/auth/sso/start') {
+        const out = await withoutScope((c) => handleSsoStart(c, oidcProvider, {
+          tenantSlug: url.searchParams.get('tenantSlug') ?? '',
+          ...(url.searchParams.get('returnTo') ? { returnTo: url.searchParams.get('returnTo')! } : {}),
+        }, now));
+        // A 302 and nothing else. No token, no secret and no assertion is in this URL -
+        // a client id, a PKCE challenge and two opaque random values.
+        res.writeHead(302, { location: out.location, 'cache-control': 'no-store' });
+        return res.end();
+      }
+
+      if (req.method === 'POST' && url.pathname === '/v1/auth/sso/callback') {
+        const b = (await readBody(req)) as Record<string, unknown>;
+        if (limited(res, req, LIMITS.signIn, 'sso-callback', undefined, now)) return;
+        const out = await withoutScope((c) => handleSsoCallback(c, oidcProvider, b, now));
+        // A REFUSAL IS A RESULT here, not an exception: consuming the single-use state
+        // and recording the attempt have to survive the refusal, and throwing rolled
+        // both back with the transaction that carried them.
+        if (!out.ok) {
+          return fail(res, out.status === 403 ? 'forbidden' : 'unauthenticated', { reason: out.reason });
+        }
+        return json(res, 200, {
+          ...(await sessionTokenFor(out.facts, now)) as Record<string, unknown>,
+          refreshToken: out.refreshToken,
+          ...(out.returnTo ? { returnTo: out.returnTo } : {}),
+        });
+      }
+
+      if (req.method === 'POST' && url.pathname === '/v1/auth/token/refresh') {
+        const b = (await readBody(req)) as { refreshToken?: string };
+        if (limited(res, req, LIMITS.signIn, 'token-refresh', undefined, now)) return;
+        // WHERE DEPROVISIONING BITES (AC-2). The access token is 15 minutes precisely
+        // so that this happens often - that number is the delay FR-3 promises, and it
+        // is a product decision recorded in ADR 0002, not a constant to tune.
+        const out = await withoutScope((c) => handleRefresh(c, oidcProvider, String(b.refreshToken ?? ''), now));
+        // Same reason: a replayed chain and a deprovisioned session are REVOKED before
+        // the refusal, and that revocation must commit.
+        if (!out.ok) return fail(res, 'unauthenticated', { reason: out.reason });
+        return json(res, 200, {
+          ...(await sessionTokenFor(out.facts, now)) as Record<string, unknown>,
+          refreshToken: out.refreshToken,
+        });
+      }
+
+      // ---- the Tenant's identity connection (Story 1.5, FR-3) ----
+      if (url.pathname === '/v1/identity-provider') {
+        const principal = resolveCellPrincipal(req.headers.authorization, now);
+        if (!principal) return fail(res, 'unauthenticated');
+        if (!(await gate(res, principal, 'identity.manage', now))) return;
+        const scope = tenantScopeOf(principal);
+        const actor = { tenantId: principal.tenantId, staffMemberId: principal.staffMemberId };
+
+        if (readMethod) {
+          return json(res, 200, await withTenantScope(scope, (c) => getIdentityProvider(c, actor.tenantId)));
+        }
+        if (req.method === 'PUT') {
+          const b = await readBody(req);
+          return json(res, 200, await withTenantScope(scope, (c) =>
+            handleConnectIdentityProvider(c, actor, b, now)));
+        }
+        if (req.method === 'DELETE') {
+          return json(res, 200, await withTenantScope(scope, (c) =>
+            handleDisconnectIdentityProvider(c, actor, now)));
+        }
+        return fail(res, 'not_found');
+      }
+
       // ---- the session, and switching Property (Story 1.3 AC-3) ----
       if (url.pathname === '/v1/auth/session' || url.pathname === '/v1/auth/context') {
         const principal = resolveCellPrincipal(req.headers.authorization, now);
@@ -569,6 +647,16 @@ export function createApp(): Server {
         return fail(res, 'validation_failed', { reason: err.message, unmet: err.unmet });
       }
       if (err instanceof ShippedRoleImmutable) return fail(res, 'conflict', { reason: err.message });
+      // Story 1.5. ONE answer for an unknown Tenant, a Tenant with no connection and an
+      // inactive one, so the sign-in route cannot be used to enumerate customers.
+      if (err instanceof SsoUnavailable) return fail(res, 'validation_failed', { reason: err.message });
+      if (err instanceof SecretUnavailable) {
+        // A configuration fault, not a caller's fault, and the message names the
+        // VARIABLE rather than the secret. 503 because retrying after somebody supplies
+        // it is exactly the right thing to do.
+        console.error('[identity] a connection references a secret that is not configured');
+        return fail(res, 'upstream_unavailable', { reason: err.message });
+      }
       if (err instanceof RoleKeyTaken) return fail(res, 'conflict', { reason: err.message });
       if (err instanceof PropertyConflict) return fail(res, 'conflict', { reason: err.message });
       if (err instanceof PropertyNotFound) return fail(res, 'not_found');

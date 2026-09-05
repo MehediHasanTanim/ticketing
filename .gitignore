@@ -14,3 +14,6 @@ clients/console/dist/
 # The bridge cannot delete files on the Mac without a per-session grant, so things
 # to be removed are parked here. Never committed - 19 git lock files were, once.
 _to_delete/
+
+# Where stale git lock files are parked when the bridge cannot delete them.
+.scratch/

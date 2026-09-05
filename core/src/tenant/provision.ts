@@ -1,6 +1,7 @@
 import { ulid } from '../ids';
 import { ValidationError } from '../validation';
 import { ROLE_PERMISSIONS, TENANT_ASSIGNABLE_ROLES } from '../staff/roles';
+import { slugify } from '../identity/connection';
 
 export { ValidationError };
 
@@ -47,6 +48,13 @@ export interface TenantProvisioned {
   payload: {
     name: string;
     /**
+     * The routing hint `GET /auth/sso/start?tenantSlug=` needs in order to choose a
+     * provider before any credential exists (Story 1.5). Not a credential: it confers
+     * nothing, and that endpoint answers identically whether or not it resolves.
+     * Recorded in the event because it is part of what this Tenant was given.
+     */
+    slug: string;
+    /**
      * Each role carries its PERMISSION SET since Story 1.4, because that set now lives
      * in `control_plane.roles` per Tenant rather than compiled into the build - a
      * hotel can duplicate a shipped role and edit the copy (FR-81), so the shipped
@@ -78,7 +86,7 @@ export function provisionTenant(
   input: { name: string; firstAdministratorEmail: string },
   now: Date,
   rand: () => number = Math.random,
-): { event: TenantProvisioned; tenantId: string; invitationId: string } {
+): { event: TenantProvisioned; tenantId: string; invitationId: string; slug: string } {
   const name = input.name?.trim() ?? '';
   if (!name) throw new ValidationError('a Tenant needs a name');
   if (name.length > MAX_NAME) throw new ValidationError(`name must be at most ${MAX_NAME} characters`);
@@ -89,9 +97,12 @@ export function provisionTenant(
   const invitationId = `01I${ulid(now, rand).slice(3)}`;
   const stamp = now.toISOString();
 
+  const slug = slugify(name);
+
   return {
     tenantId,
     invitationId,
+    slug,
     event: {
       eventId: ulid(now, rand),
       type: 'TenantProvisioned',
@@ -101,6 +112,7 @@ export function provisionTenant(
       recordedAt: stamp,
       payload: {
         name,
+        slug,
         roles: SHIPPED_ROLES.map((r) => ({
           key: r.key,
           name: r.name,

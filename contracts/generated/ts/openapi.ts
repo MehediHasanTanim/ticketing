@@ -358,7 +358,6 @@ export const OPENAPI_DOCUMENT = {
           "auth"
         ],
         "x-story": "1.5",
-        "x-implemented": false,
         "security": [],
         "summary": "Begin authentication at the Tenant's identity provider.",
         "description": "Resolves the Tenant's SAML 2.0 / OIDC connection and redirects to it. The connection is per Tenant and never global (FR-3), so the Tenant has to be identified before a provider can be chosen; `tenantSlug` is a routing hint, not a credential. An unknown Tenant, and a Tenant with no provider configured, produce the SAME outcome as a rejected assertion - the response never reveals whether a Tenant exists or has SSO connected. `state` is opaque, single-use and bound to the callback. No token, client secret or assertion appears in this or any other query string.",
@@ -388,7 +387,7 @@ export const OPENAPI_DOCUMENT = {
             "description": "redirect to the identity provider",
             "headers": {
               "Location": {
-                "description": "the provider's authorisation endpoint",
+                "description": "The provider's authorisation endpoint, carrying `state` and a PKCE `code_challenge` (S256). No secret and no token appears in it.",
                 "schema": {
                   "type": "string"
                 }
@@ -396,10 +395,14 @@ export const OPENAPI_DOCUMENT = {
             }
           },
           "400": {
-            "$ref": "#/components/responses/Error"
-          },
-          "501": {
-            "$ref": "#/components/responses/NotImplemented"
+            "description": "ONE answer for every reason this cannot proceed - unknown Tenant, no connection, an inactive one - so the endpoint cannot be used to discover which Tenants exist or which have SSO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -411,7 +414,6 @@ export const OPENAPI_DOCUMENT = {
           "auth"
         ],
         "x-story": "1.5",
-        "x-implemented": false,
         "security": [],
         "summary": "Exchange an OIDC code or a SAML assertion for a session.",
         "description": "AUTHENTICATION IS NOT AUTHORISATION. Just-in-time provisioning is off by default (FR-83), so an identity that authenticates successfully but matches no provisioned Staff Member gets `forbidden` and NO SESSION - not a session holding an empty permission set, which every client would then have to remember to handle. A provider connected for Tenant A never authenticates a Tenant B user. The code and the assertion arrive in the body and are never logged.",
@@ -444,9 +446,6 @@ export const OPENAPI_DOCUMENT = {
           },
           "403": {
             "$ref": "#/components/responses/Error"
-          },
-          "501": {
-            "$ref": "#/components/responses/NotImplemented"
           }
         }
       }
@@ -617,10 +616,9 @@ export const OPENAPI_DOCUMENT = {
           "auth"
         ],
         "x-story": "1.5",
-        "x-implemented": false,
         "security": [],
         "summary": "Exchange a refresh token for a new short-lived access token.",
-        "description": "This is the mechanism behind \"access is lost at next token validation, without a manual step in JazzTicketing\" (Story 1.5 AC-2): upstream state is re-checked HERE. Access tokens are therefore deliberately short-lived, and the refresh is where deprovisioning bites. A deprovisioned, disabled or revoked identity gets `unauthenticated` and the refresh token is burned. Rotation is single-use - presenting the same refresh token twice invalidates the whole session chain, because a replay means the token is no longer in only one place. Body, never a URL; never logged.",
+        "description": "This is the mechanism behind \"access is lost at next token validation, without a manual step in JazzTicketing\" (Story 1.5 AC-2): upstream state is re-checked HERE. Access tokens are therefore deliberately short-lived, and the refresh is where deprovisioning bites. A deprovisioned, disabled or revoked identity gets `unauthenticated` and the refresh token is burned. Rotation is single-use - presenting the same refresh token twice invalidates the whole session chain, because a replay means the token is no longer in only one place. Body, never a URL; never logged.\n\nLIFETIME SETTLED 2026-09-05: the access token lives **15 minutes**, and that number is the answer to \"how long does a deprovisioned identity keep working\" - a product commitment under FR-3, not a tuning constant. Changing it changes what the product promises, so it is stated here and in ADR 0002 rather than left in a module somebody tunes.",
         "requestBody": {
           "required": true,
           "content": {
@@ -647,9 +645,6 @@ export const OPENAPI_DOCUMENT = {
           },
           "401": {
             "$ref": "#/components/responses/Error"
-          },
-          "501": {
-            "$ref": "#/components/responses/NotImplemented"
           }
         }
       }
@@ -1092,6 +1087,105 @@ export const OPENAPI_DOCUMENT = {
           },
           "501": {
             "$ref": "#/components/responses/NotImplemented"
+          }
+        }
+      }
+    },
+    "/identity-provider": {
+      "get": {
+        "operationId": "getIdentityProvider",
+        "tags": [
+          "auth"
+        ],
+        "x-story": "1.5",
+        "summary": "The Tenant's identity connection, without its secret.",
+        "description": "NO SECRET IS EVER RETURNED, and none is stored in this row: the connection holds a REFERENCE into the platform secret store, and the value is resolved at the moment it is used. An administration screen that can display a client secret is a screen that can leak one.",
+        "responses": {
+          "200": {
+            "description": "the connection, or `connected: false` when there is none",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityConnection"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "connectIdentityProvider",
+        "tags": [
+          "auth"
+        ],
+        "x-story": "1.5",
+        "summary": "Connect or reconfigure this Tenant's identity provider.",
+        "description": "IDEMPOTENT, hence PUT: a Tenant has at most one connection, and reconfiguring it is the same act as connecting it. Recorded either way with the actor and the previous value (FR-6), because changing where a Tenant's people authenticate is among the most consequential things an administrator can do.\n\n**JUST-IN-TIME PROVISIONING IS OFF BY DEFAULT** (FR-83), and that is a security decision rather than a preference: authentication is not authorisation. Omitting `justInTimeProvisioning` leaves it off; turning it on is an audited Tenant-level change. With it off, an identity that authenticates successfully but matches no provisioned Staff Member gets `forbidden` and NO SESSION - not a session holding an empty permission set, which every client would then have to remember to handle.\n\nSAML 2.0 connections are ACCEPTED AND STORED, and a SAML sign-in is refused until a reviewed XML signature library is adopted - see the story record. XML signature verification is the most historically broken thing in identity (signature wrapping), and hand-rolling it in the auth path would be worse than not shipping it.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectIdentityProviderRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "the connection as it now stands",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityConnection"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "disconnectIdentityProvider",
+        "tags": [
+          "auth"
+        ],
+        "x-story": "1.5",
+        "summary": "Disconnect the provider. Existing sessions are revoked.",
+        "description": "Disconnecting REVOKES every session that was opened through the provider, and leaves password and PIN credentials alone. The alternative - letting SSO sessions run to their natural expiry - would mean a Tenant that disconnected a compromised provider still had people signed in through it.\n\nThe connection row is kept and marked inactive rather than deleted, so the audit trail still resolves what a past session authenticated against.",
+        "responses": {
+          "200": {
+            "description": "disconnected, with the number of sessions revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityConnection"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -2587,6 +2681,94 @@ export const OPENAPI_DOCUMENT = {
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "IdentityConnection": {
+        "type": "object",
+        "required": [
+          "connected",
+          "justInTimeProvisioning"
+        ],
+        "description": "A Tenant's connection, as an administrator may see it. No client secret, no signing key, no assertion - the row holds a reference into the platform secret store and this representation does not even hold that.",
+        "properties": {
+          "connected": {
+            "type": "boolean"
+          },
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "oidc",
+              "saml"
+            ]
+          },
+          "issuer": {
+            "type": "string",
+            "description": "The provider's issuer identifier, matched against the `iss` claim on every token."
+          },
+          "clientId": {
+            "type": "string"
+          },
+          "justInTimeProvisioning": {
+            "type": "boolean",
+            "description": "FR-83. False unless a Tenant deliberately turned it on, and turning it on is an audited change. With it off, authenticating proves who somebody is and grants them nothing."
+          },
+          "signInUrl": {
+            "type": "string",
+            "description": "Where this Tenant's people begin. Contains the Tenant's slug, which is a ROUTING HINT and not a credential - it identifies which provider to redirect to and confers nothing on its own."
+          },
+          "signInAvailable": {
+            "type": "boolean",
+            "description": "False for a stored SAML connection, which can be configured but cannot yet complete a sign-in. `unavailableReason` says why, so an administrator finds out when they connect it rather than when their people cannot get in."
+          },
+          "unavailableReason": {
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ConnectIdentityProviderRequest": {
+        "type": "object",
+        "required": [
+          "protocol",
+          "issuer",
+          "clientId",
+          "clientSecretRef"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "oidc",
+              "saml"
+            ]
+          },
+          "issuer": {
+            "type": "string",
+            "maxLength": 512,
+            "description": "An https URL. OIDC discovery is performed against it, so the endpoints are read from the provider rather than typed by an administrator who would otherwise have to keep them current."
+          },
+          "clientId": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "clientSecretRef": {
+            "type": "string",
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_.-]+$",
+            "description": "A NAME IN THE PLATFORM SECRET STORE, never the secret itself. The value is resolved at the moment it is used and never stored, returned or logged. Refusing to accept the secret over this API is deliberate: a value that never enters the system cannot leak from it."
+          },
+          "justInTimeProvisioning": {
+            "type": "boolean",
+            "default": false,
+            "description": "FR-83, off unless deliberately enabled. Omitted means off; there is no configuration in which it defaults on."
           }
         }
       },

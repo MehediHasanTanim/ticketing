@@ -113,6 +113,9 @@ services:
       # container refuses to start without it and says why, rather than signing
       # every session in this cell with a key published in this file.
       SESSION_TOKEN_SECRET: ${SESSION_TOKEN_SECRET:?set it in .env - openssl rand -base64 32}
+      # Story 1.5: encrypts provider refresh tokens. No default, same reasoning.
+      UPSTREAM_TOKEN_KEY: ${UPSTREAM_TOKEN_KEY:?set it in .env - openssl rand -base64 32}
+      SSO_REDIRECT_URI: ${SSO_REDIRECT_URI:-http://localhost:${CONSOLE_PORT:-8081}/auth/callback}
       FIXTURE_AUTH_SECRET: ${FIXTURE_AUTH_SECRET:-}
       # Swagger UI for the INTERNAL surface, at /control/v1/docs. Off unless set to
       # 1, unlike the cell's: FR-1 makes non-advertisement a property of this

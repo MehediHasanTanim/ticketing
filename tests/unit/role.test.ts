@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   unmetDependencies, normalisePermissions, assertNoEscalation, assertCoherent,
@@ -348,9 +348,16 @@ describe('the shipped baseline and the migration that backfilled it', () => {
     // NEW Tenant with; migration 009 wrote the same sets into every Tenant that
     // already existed. Drift between a constant and a migration is the kind that
     // surprises one Tenant and not the others, so it fails here instead.
-    const sql = readFileSync(join(__dirname, '..', '..', 'ops', 'migrations', '009_custom_roles.sql'), 'utf8');
+    // EVERY migration, in order, and the LAST statement wins - because the shipped
+    // baseline changes by migration and only by migration (Story 1.4's trigger has no
+    // owner exemption), so 010 amending what 009 wrote is the normal case rather than
+    // an exception. Reading only the first migration would have made this test green
+    // while the constant and the database disagreed.
+    const dir = join(__dirname, '..', '..', 'ops', 'migrations');
+    const sql = readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()
+      .map((f) => readFileSync(join(dir, f), 'utf8')).join('\n');
     const fromMigration = new Map<string, string[]>();
-    const statement = /UPDATE control_plane\.roles SET permissions = ARRAY\[([^\]]*)\][\s\S]*?key (?:IN \(([^)]*)\)|= '([a-z_]+)')/g;
+    const statement = /UPDATE control_plane\.roles\s+SET permissions = ARRAY\[([^\]]*)\][\s\S]*?key (?:IN \(([^)]*)\)|= '([a-z_]+)')/g;
     for (const m of sql.matchAll(statement)) {
       const permissions = [...m[1]!.matchAll(/'([^']+)'/g)].map((x) => x[1]!).sort();
       const keys = m[3] ? [m[3]] : [...m[2]!.matchAll(/'([^']+)'/g)].map((x) => x[1]!);
@@ -366,7 +373,9 @@ describe('the shipped baseline and the migration that backfilled it', () => {
   });
 
   it('agree about which roles may be held Tenant-wide', () => {
-    const sql = readFileSync(join(__dirname, '..', '..', 'ops', 'migrations', '009_custom_roles.sql'), 'utf8');
+    const dir = join(__dirname, '..', '..', 'ops', 'migrations');
+    const sql = readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()
+      .map((f) => readFileSync(join(dir, f), 'utf8')).join('\n');
     for (const role of SHIPPED_ROLES) {
       const expected = TENANT_ASSIGNABLE_ROLES.includes(role.key);
       // The migration sets the flag only where it is true, so its presence beside a
