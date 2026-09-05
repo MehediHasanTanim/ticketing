@@ -2,6 +2,7 @@ import { ulid } from '../ids';
 import { ValidationError } from '../validation';
 import { ROLE_PERMISSIONS, TENANT_ASSIGNABLE_ROLES } from '../staff/roles';
 import { slugify } from '../identity/connection';
+import { platformDefaults } from './settings';
 
 export { ValidationError };
 
@@ -31,11 +32,14 @@ export const SHIPPED_ROLES = [
  * defaults and FR-83 owns their blast-radius display, so anything richer here would
  * be designing 1.6's model from inside 1.1 and then migrating it.
  */
-export const PLATFORM_DEFAULTS = {
-  locale: 'en',
-  // FR-85's default, stated where the Tenant is born rather than assumed later.
-  mfaRequired: false,
-} as const;
+/**
+ * The defaults a new Tenant is seeded with. Since Story 1.6 this is DERIVED from the
+ * settings catalogue rather than restated here, so a key added to the catalogue reaches
+ * new Tenants without a second edit somebody has to remember - which is exactly how
+ * `crossTenantGuestHistory` would otherwise have existed for old Tenants and not new
+ * ones, or the reverse.
+ */
+export const PLATFORM_DEFAULTS = platformDefaults();
 
 export interface TenantProvisioned {
   eventId: string;

@@ -737,6 +737,66 @@ export interface paths {
         patch: operations["updateRole"];
         trace?: never;
     };
+    "/tenant/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every Tenant default, with the blast radius of changing it.
+         * @description `inheritingPropertyCount` is the stated blast radius: how many Properties would be affected by changing this key right now. `overriddenBy` names the ones that would not, so the two halves of AC-1 - what a change reaches and what it does not - are answerable from one response.
+         *
+         *     `regions` is a READ-ONLY SUMMARY (AC-4). Region is chosen when a Property is created and immutable thereafter (DG-4): a data-residency obligation, not a preference. There is no operation on this surface that changes one, and the Tenant settings PATCH refuses the key outright rather than merely omitting a control - a missing control is not a refusal.
+         */
+        get: operations["getTenantSettings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change Tenant defaults. Applies to inheriting Properties and no others.
+         * @description A change reaches every Property that has not taken the key over, and NO OTHERS (AC-1). It reaches them by REFERENCE - nothing is rewritten per Property - which is why a Property that overrode the key is untouched by construction rather than by a filter somebody remembered to write (AD-9).
+         *
+         *     Cross-Tenant guest history (FR-45) and retention (DG-2) are settable only here, never per Property, and every change to them is attributed in the audit trail with the actor and the PREVIOUS VALUE (AC-3, FR-6). Retention is bounded by a platform maximum; a value past it is refused rather than clamped, because silently storing a different number than an administrator typed is how a governance setting stops meaning anything.
+         *
+         *     Sending a value that is already in force is not a change and writes no audit entry: a trail full of non-changes is one nobody reads.
+         */
+        patch: operations["updateTenantSettings"];
+        trace?: never;
+    };
+    "/properties/{propertyId}/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What is in force at this Property, and what it inherits.
+         * @description The other half of AC-2: an override is visible from the PROPERTY surface as well as the Tenant one. Each key says whether it is inherited, what is in force, and what the Tenant currently holds - so a Property administrator can see both the value they took over and the value they are declining.
+         *
+         *     Resolved by the same function the Tenant surface uses. The two must never disagree about what is in force, and the only way to guarantee that is for there to be one rule rather than two implementations of it.
+         */
+        get: operations["getPropertySettings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Take a default over for this Property. Permanently.
+         * @description An override STOPS INHERITANCE PERMANENTLY (AC-2). A later Tenant-level change does not silently re-apply, and there is no "until the Tenant value changes" state - the key is either this Property's or the Tenant's, and taking it is a decision that stands until somebody makes another one.
+         *
+         *     Inheritance is decided by the KEY'S PRESENCE and never by comparing values. A Property that overrides a key to the same value the Tenant happens to hold has still declined it: a resolver that asked "is it different?" would put such a Property back to inheriting, and the next Tenant change would reach one that had explicitly opted out.
+         *
+         *     TENANT-ONLY KEYS ARE REFUSED HERE (AC-3), and the refusal names the reason: an administrator who tried to set retention for one Property needs to know it is a Tenant decision, not that they typed it wrong. Region is refused too, and is not a setting at all (DG-4).
+         */
+        patch: operations["overridePropertySettings"];
+        trace?: never;
+    };
     "/properties": {
         parameters: {
             query?: never;
@@ -1244,6 +1304,72 @@ export interface components {
              * @description Present when an email address was given. After this the link is refused.
              */
             invitationExpiresAt?: string;
+        };
+        TenantSetting: {
+            key: string;
+            /** @description The Tenant-level value. Type depends on the key. */
+            value: unknown;
+            /**
+             * @description `tenant_only` keys govern a whole management company's data - cross-Tenant guest history and retention - so no Property may answer them differently. A Property override of one is refused.
+             * @enum {string}
+             */
+            scope: "inheritable" | "tenant_only";
+            /** @description THE BLAST RADIUS. How many Properties would be affected by changing this key right now, computed live on every read. A cached count that is wrong is worse than no count, because it is the number somebody decides on. */
+            inheritingPropertyCount: number;
+            /** @description The Properties a change would NOT reach, and what each holds instead. */
+            overriddenBy: components["schemas"]["PropertyOverride"][];
+            /** @description Present on keys whose change is attributed for a stated reason (FR-45, DG-2, FR-85). The reason itself, so a settings screen can say why rather than marking it with an icon nobody can interpret. */
+            governance?: string;
+            /** @description The platform maximum, where DG-2 imposes one. A value past it is refused, never clamped. */
+            maximum?: number;
+        };
+        PropertyOverride: {
+            propertyId: string;
+            name: string;
+            /** @description What this Property holds instead. */
+            value: unknown;
+        };
+        TenantSettings: {
+            settings: components["schemas"]["TenantSetting"][];
+            /** @description Active Properties in this Tenant, so a blast radius reads against a total. */
+            propertyCount: number;
+            /** @description READ-ONLY (AC-4, DG-4). Region is chosen at Property creation and immutable thereafter; this surface shows it and offers no control, and the PATCH refuses the key. */
+            regions: components["schemas"]["PropertyRegion"][];
+            /** Format: date-time */
+            updatedAt?: string;
+        };
+        PropertyRegion: {
+            propertyId: string;
+            name: string;
+            region: string;
+            active: boolean;
+        };
+        /** @description One or more setting keys and their new values. `region` is refused rather than ignored, and so is any key that is not in the catalogue - a setting nobody implements confers nothing and looks like configuration. */
+        UpdateTenantSettingsRequest: {
+            [key: string]: unknown;
+        };
+        /** @description One or more INHERITABLE keys this Property takes over, permanently. A `tenant_only` key is refused with the reason named. */
+        OverridePropertySettingsRequest: {
+            [key: string]: unknown;
+        };
+        PropertySettings: {
+            propertyId: string;
+            /** @description Shown, never settable (DG-4). */
+            region: string;
+            /** @enum {boolean} */
+            regionImmutable: true;
+            settings: components["schemas"]["EffectiveSetting"][];
+        };
+        EffectiveSetting: {
+            key: string;
+            /** @description What is in force here. */
+            value: unknown;
+            /** @description False once this Property has taken the key over - permanently. Decided by the key's presence in the override set, never by comparing values: a Property that overrode a key to the value the Tenant happens to hold has still declined it. */
+            inherited: boolean;
+            /** @description What the Tenant currently holds */
+            tenantValue: unknown;
+            /** @enum {string} */
+            scope: "inheritable" | "tenant_only";
         };
         CreatePropertyRequest: {
             name: string;
@@ -2318,6 +2444,110 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
+        };
+    };
+    getTenantSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description the Tenant's defaults, their blast radius, and the region summary */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantSettings"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    updateTenantSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateTenantSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description the settings as they now stand, with recomputed blast radius */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantSettings"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    getPropertySettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                propertyId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description the effective settings at this Property */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PropertySettings"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    overridePropertySettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                propertyId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OverridePropertySettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description the effective settings at this Property, after the override */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PropertySettings"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     listProperties: {

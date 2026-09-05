@@ -39,6 +39,11 @@ tags:
       Staff Members, their roles per Property, and the shipped role set. TENANT-scoped
       for the same reason as properties: an invitation spans Properties, so it cannot
       be scoped to one.
+  - name: tenant-settings
+    description: >-
+      Tenant defaults, the blast radius of changing one, and the per-Property overrides
+      that decline it. One resolution rule serves both surfaces: the Tenant view and the
+      Property view must never disagree about what is in force.
   - name: isolation-fixture
     description: >-
       Story 1.0's cross-tenant isolation fixture. NOT a domain aggregate and not a
@@ -1236,6 +1241,146 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+  # ---- Tenant defaults and their blast radius (Story 1.6, FR-83) ----
+  # THE COUNT IS THE FEATURE. A Tenant of 200 Properties makes an unannounced default
+  # change a 200-Property incident, so every default carries the number of Properties
+  # currently inheriting it, computed live. A cached count that is wrong is worse than
+  # no count, because it is the number somebody decides on.
+  /tenant/settings:
+    get:
+      operationId: getTenantSettings
+      tags: [tenant-settings]
+      x-story: "1.6"
+      summary: Every Tenant default, with the blast radius of changing it.
+      description: >-
+        `inheritingPropertyCount` is the stated blast radius: how many Properties would
+        be affected by changing this key right now. `overriddenBy` names the ones that
+        would not, so the two halves of AC-1 - what a change reaches and what it does
+        not - are answerable from one response.
+
+
+        `regions` is a READ-ONLY SUMMARY (AC-4). Region is chosen when a Property is
+        created and immutable thereafter (DG-4): a data-residency obligation, not a
+        preference. There is no operation on this surface that changes one, and the
+        Tenant settings PATCH refuses the key outright rather than merely omitting a
+        control - a missing control is not a refusal.
+      responses:
+        "200":
+          description: the Tenant's defaults, their blast radius, and the region summary
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TenantSettings" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateTenantSettings
+      tags: [tenant-settings]
+      x-story: "1.6"
+      summary: Change Tenant defaults. Applies to inheriting Properties and no others.
+      description: >-
+        A change reaches every Property that has not taken the key over, and NO OTHERS
+        (AC-1). It reaches them by REFERENCE - nothing is rewritten per Property - which
+        is why a Property that overrode the key is untouched by construction rather than
+        by a filter somebody remembered to write (AD-9).
+
+
+        Cross-Tenant guest history (FR-45) and retention (DG-2) are settable only here,
+        never per Property, and every change to them is attributed in the audit trail
+        with the actor and the PREVIOUS VALUE (AC-3, FR-6). Retention is bounded by a
+        platform maximum; a value past it is refused rather than clamped, because
+        silently storing a different number than an administrator typed is how a
+        governance setting stops meaning anything.
+
+
+        Sending a value that is already in force is not a change and writes no audit
+        entry: a trail full of non-changes is one nobody reads.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateTenantSettingsRequest" }
+      responses:
+        "200":
+          description: the settings as they now stand, with recomputed blast radius
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TenantSettings" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /properties/{propertyId}/settings:
+    get:
+      operationId: getPropertySettings
+      tags: [tenant-settings]
+      x-story: "1.6"
+      summary: What is in force at this Property, and what it inherits.
+      description: >-
+        The other half of AC-2: an override is visible from the PROPERTY surface as well
+        as the Tenant one. Each key says whether it is inherited, what is in force, and
+        what the Tenant currently holds - so a Property administrator can see both the
+        value they took over and the value they are declining.
+
+
+        Resolved by the same function the Tenant surface uses. The two must never
+        disagree about what is in force, and the only way to guarantee that is for there
+        to be one rule rather than two implementations of it.
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: the effective settings at this Property
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PropertySettings" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: overridePropertySettings
+      tags: [tenant-settings]
+      x-story: "1.6"
+      summary: Take a default over for this Property. Permanently.
+      description: >-
+        An override STOPS INHERITANCE PERMANENTLY (AC-2). A later Tenant-level change
+        does not silently re-apply, and there is no "until the Tenant value changes"
+        state - the key is either this Property's or the Tenant's, and taking it is a
+        decision that stands until somebody makes another one.
+
+
+        Inheritance is decided by the KEY'S PRESENCE and never by comparing values. A
+        Property that overrides a key to the same value the Tenant happens to hold has
+        still declined it: a resolver that asked "is it different?" would put such a
+        Property back to inheriting, and the next Tenant change would reach one that had
+        explicitly opted out.
+
+
+        TENANT-ONLY KEYS ARE REFUSED HERE (AC-3), and the refusal names the reason: an
+        administrator who tried to set retention for one Property needs to know it is a
+        Tenant decision, not that they typed it wrong. Region is refused too, and is not
+        a setting at all (DG-4).
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OverridePropertySettingsRequest" }
+      responses:
+        "200":
+          description: the effective settings at this Property, after the override
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PropertySettings" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   # ---- Properties (Story 1.2, FR-1) ----
   # TENANT-SCOPED, not Property-scoped, and the only operations in this document
   # that are. Creating the first Property is the one thing AD-3's "every request
@@ -2197,6 +2342,113 @@ components:
           type: string
           format: date-time
           description: Present when an email address was given. After this the link is refused.
+    TenantSetting:
+      type: object
+      required: [key, value, scope, inheritingPropertyCount, overriddenBy]
+      properties:
+        key: { type: string }
+        value: { description: The Tenant-level value. Type depends on the key. }
+        scope:
+          type: string
+          enum: [inheritable, tenant_only]
+          description: >-
+            `tenant_only` keys govern a whole management company's data - cross-Tenant
+            guest history and retention - so no Property may answer them differently. A
+            Property override of one is refused.
+        inheritingPropertyCount:
+          type: integer
+          description: >-
+            THE BLAST RADIUS. How many Properties would be affected by changing this key
+            right now, computed live on every read. A cached count that is wrong is worse
+            than no count, because it is the number somebody decides on.
+        overriddenBy:
+          type: array
+          description: The Properties a change would NOT reach, and what each holds instead.
+          items: { $ref: "#/components/schemas/PropertyOverride" }
+        governance:
+          type: string
+          description: >-
+            Present on keys whose change is attributed for a stated reason (FR-45, DG-2,
+            FR-85). The reason itself, so a settings screen can say why rather than
+            marking it with an icon nobody can interpret.
+        maximum:
+          type: integer
+          description: The platform maximum, where DG-2 imposes one. A value past it is refused, never clamped.
+    PropertyOverride:
+      type: object
+      required: [propertyId, name, value]
+      properties:
+        propertyId: { type: string }
+        name: { type: string }
+        value: { description: What this Property holds instead. }
+    TenantSettings:
+      type: object
+      required: [settings, propertyCount, regions]
+      properties:
+        settings:
+          type: array
+          items: { $ref: "#/components/schemas/TenantSetting" }
+        propertyCount:
+          type: integer
+          description: Active Properties in this Tenant, so a blast radius reads against a total.
+        regions:
+          type: array
+          description: >-
+            READ-ONLY (AC-4, DG-4). Region is chosen at Property creation and immutable
+            thereafter; this surface shows it and offers no control, and the PATCH
+            refuses the key.
+          items: { $ref: "#/components/schemas/PropertyRegion" }
+        updatedAt: { type: string, format: date-time }
+    PropertyRegion:
+      type: object
+      required: [propertyId, name, region, active]
+      properties:
+        propertyId: { type: string }
+        name: { type: string }
+        region: { type: string }
+        active: { type: boolean }
+    UpdateTenantSettingsRequest:
+      type: object
+      minProperties: 1
+      additionalProperties: true
+      description: >-
+        One or more setting keys and their new values. `region` is refused rather than
+        ignored, and so is any key that is not in the catalogue - a setting nobody
+        implements confers nothing and looks like configuration.
+    OverridePropertySettingsRequest:
+      type: object
+      minProperties: 1
+      additionalProperties: true
+      description: >-
+        One or more INHERITABLE keys this Property takes over, permanently. A
+        `tenant_only` key is refused with the reason named.
+    PropertySettings:
+      type: object
+      required: [propertyId, region, regionImmutable, settings]
+      properties:
+        propertyId: { type: string }
+        region:
+          type: string
+          description: Shown, never settable (DG-4).
+        regionImmutable: { type: boolean, enum: [true] }
+        settings:
+          type: array
+          items: { $ref: "#/components/schemas/EffectiveSetting" }
+    EffectiveSetting:
+      type: object
+      required: [key, value, inherited, tenantValue, scope]
+      properties:
+        key: { type: string }
+        value: { description: What is in force here. }
+        inherited:
+          type: boolean
+          description: >-
+            False once this Property has taken the key over - permanently. Decided by the
+            key's presence in the override set, never by comparing values: a Property
+            that overrode a key to the value the Tenant happens to hold has still
+            declined it.
+        tenantValue: { description: What the Tenant currently holds, so a declined value is visible too. }
+        scope: { type: string, enum: [inheritable, tenant_only] }
     CreatePropertyRequest:
       type: object
       required: [name, region, timezone, currency]

@@ -676,6 +676,73 @@ expect_red "the fixture stub refuses to run in production (Story 1.5)" \
     if (fixtureStubEnabled()) { console.error("the stub is live with NODE_ENV=production"); process.exit(0); }
     process.exit(1);'
 
+echo "== 49. blast radius: count every Property, whatever they have overridden =="
+# AC-1, and the story is explicit: "a cached count that is wrong is worse than no count."
+# The number's only job is to be the one somebody decides on, so a count that ignores
+# overrides tells an administrator a change reaches five Properties when it reaches three.
+cp app/src/tenant/settings.ts /tmp/tsettings.nc.bak
+python3 - <<'PY2'
+import pathlib
+p = pathlib.Path('app/src/tenant/settings.ts'); t = p.read_text()
+t = t.replace("      inheritingPropertyCount: live.length - overriding.length,",
+              "      inheritingPropertyCount: live.length,", 1)
+p.write_text(t)
+PY2
+expect_red "the blast radius counts only Properties that inherit (Story 1.6 AC-1)" \
+  npx vitest run tests/tenant-settings.test.ts
+cp /tmp/tsettings.nc.bak app/src/tenant/settings.ts
+
+echo "== 50. override: make it last only until the Tenant value changes =="
+# The wrong model the story names in advance, and the one that passes a single pass:
+# comparing VALUES instead of asking whether the key is present. A Property that
+# overrode to 'ar' would silently start inheriting again the moment the Tenant moved to
+# 'ar' - and would then follow the Tenant away from it.
+cp core/src/tenant/settings.ts /tmp/csettings.nc.bak
+python3 - <<'PY2'
+import pathlib
+p = pathlib.Path('core/src/tenant/settings.ts'); t = p.read_text()
+t = t.replace("""    const overridden = spec.scope === 'inheritable'
+      && Object.prototype.hasOwnProperty.call(overrides, key);""",
+"""    const overridden = spec.scope === 'inheritable'
+      && Object.prototype.hasOwnProperty.call(overrides, key)
+      && overrides[key] !== tenantValue;""", 1)
+p.write_text(t)
+PY2
+expect_red "an override is permanent, not until the Tenant value changes (AC-2)" \
+  npx vitest run tests/unit/tenant-settings.test.ts
+cp /tmp/csettings.nc.bak core/src/tenant/settings.ts
+
+echo "== 51. governance settings: ignore a Property override instead of refusing it =="
+# AC-3. Silently dropping it leaves a property administrator believing their Property
+# opted out of the Tenant's retention policy - which is exactly the belief that makes a
+# governance setting worthless.
+cp core/src/tenant/settings.ts /tmp/csettings.nc.bak
+python3 - <<'PY2'
+import pathlib
+p = pathlib.Path('core/src/tenant/settings.ts'); t = p.read_text()
+t = t.replace("    if (spec.scope === 'tenant_only') {\n      throw new ValidationError(",
+              "    if (false) {\n      throw new ValidationError(", 1)
+p.write_text(t)
+PY2
+expect_red "a Tenant-only setting is refused at a Property, not ignored (AC-3)" \
+  npx vitest run tests/unit/tenant-settings.test.ts
+cp /tmp/csettings.nc.bak core/src/tenant/settings.ts
+
+echo "== 52. retention: let a Tenant raise the platform maximum =="
+# DG-2 is a platform commitment. A Tenant that could set retention to a decade would be
+# making that commitment on Jazzware's behalf.
+cp core/src/tenant/settings.ts /tmp/csettings.nc.bak
+python3 - <<'PY2'
+import pathlib
+p = pathlib.Path('core/src/tenant/settings.ts'); t = p.read_text()
+t = t.replace("    if (spec.maximum !== undefined && value > spec.maximum) {",
+              "    if (false) {", 1)
+p.write_text(t)
+PY2
+expect_red "retention is bounded by a platform maximum (DG-2)" \
+  npx vitest run tests/unit/tenant-settings.test.ts
+cp /tmp/csettings.nc.bak core/src/tenant/settings.ts
+
 echo
 echo "negative controls: ${pass} correctly went red, ${fail} did not, ${unverified} unverifiable here"
 [ "${fail}" -eq 0 ]

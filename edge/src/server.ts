@@ -32,6 +32,10 @@ import {
   handleSsoStart, handleSsoCallback, handleRefresh, SsoUnavailable,
 } from '../../app/src/identity/sso';
 import { oidcProvider } from '../../adapters/src/identity/oidc';
+import {
+  getTenantSettings, handleUpdateTenantSettings,
+  getPropertySettings, handleOverridePropertySettings,
+} from '../../app/src/tenant/settings';
 import { SecretUnavailable } from '../../adapters/src/identity/secret-store';
 import {
   handleDuplicateRole, handleUpdateRole, listPermissions,
@@ -389,6 +393,32 @@ export function createApp(): Server {
         });
       }
 
+      // ---- Tenant defaults and their blast radius (Story 1.6, FR-83) ----
+      // TENANT-scope authority: changing a default changes it for every Property that
+      // inherits it, and on a 200-Property estate (NFR-4) that is a 200-Property change.
+      if (url.pathname === '/v1/tenant/settings') {
+        const principal = resolveCellPrincipal(req.headers.authorization, now);
+        if (!principal) return fail(res, 'unauthenticated');
+        const scope = tenantScopeOf(principal);
+        const actor = { tenantId: principal.tenantId, staffMemberId: principal.staffMemberId };
+
+        if (readMethod) {
+          // Read needs only `property.read`: the blast radius is what an administrator
+          // consults BEFORE deciding, and gating the number behind the authority to
+          // change it would mean the only people who can see the consequence are the
+          // ones who have already decided they can live with it.
+          if (!(await gate(res, principal, 'property.read', now))) return;
+          return json(res, 200, await withTenantScope(scope, (c) => getTenantSettings(c, actor.tenantId)));
+        }
+        if (req.method === 'PATCH') {
+          if (!(await gate(res, principal, 'settings.manage', now))) return;
+          const b = await readBody(req);
+          return json(res, 200, await withTenantScope(scope, (c) =>
+            handleUpdateTenantSettings(c, actor, b, now)));
+        }
+        return fail(res, 'not_found');
+      }
+
       // ---- the Tenant's identity connection (Story 1.5, FR-3) ----
       if (url.pathname === '/v1/identity-provider') {
         const principal = resolveCellPrincipal(req.headers.authorization, now);
@@ -556,6 +586,31 @@ export function createApp(): Server {
         if (readMethod && url.pathname === '/v1/properties') {
           if (!(await gate(res, principal, 'property.read', now))) return;
           return json(res, 200, await withTenantScope(tenant, (c) => listProperties(c, tenant.tenantId)));
+        }
+
+        // AC-2's other half: the override has to be visible from the PROPERTY surface
+        // as well as the Tenant one, and both render from the same resolution in
+        // `core/src/tenant/settings.ts` so they cannot disagree about what is in force.
+        const settings = /^\/v1\/properties\/([^/]+)\/settings$/.exec(url.pathname);
+        if (settings) {
+          const propertyId = decodeURIComponent(settings[1] ?? '');
+          if (readMethod) {
+            if (!(await gate(res, principal, 'property.read', now))) return;
+            return json(res, 200, await withTenantScope(tenant, (c) =>
+              getPropertySettings(c, tenant.tenantId, propertyId)));
+          }
+          if (req.method === 'PATCH') {
+            // A PROPERTY-level act, so Property-level authority is enough: requiring
+            // Tenant-wide would mean a property administrator could not take a default
+            // over for their own Property, which is what an override is for.
+            if (!(await gate(res, principal, 'property.settings.write', now))) return;
+            const b = await readBody(req);
+            return json(res, 200, await withTenantScope(tenant, (c) =>
+              handleOverridePropertySettings(c, {
+                tenantId: tenant.tenantId, staffMemberId: principal.staffMemberId,
+              }, propertyId, b, now)));
+          }
+          return fail(res, 'not_found');
         }
 
         const setup = /^\/v1\/properties\/([^/]+)\/setup$/.exec(url.pathname);

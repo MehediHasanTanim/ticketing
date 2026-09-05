@@ -1,6 +1,6 @@
 # Story 1.6: Manage Tenant defaults and see their blast radius
 
-Status: ready-for-dev
+Status: review
 
 <!-- Created by bmad-create-story 2026-09-02. Story statement and acceptance criteria are transcribed verbatim from planning-artifacts/epics.md (status: final) - do not reword them here; a story needing a different criterion is a change to raise in epics.md. Epic 1: Property go-live foundation. -->
 
@@ -91,10 +91,115 @@ Extends `core/property` settings resolution; new `app/tenant/settings`. One sett
 
 ### Agent Model Used
 
-_(to be filled by the dev agent)_
+claude-opus-5 (Cowork, remote session linked to tanim-m4-pro-local).
 
 ### Debug Log References
 
+`.dev-refresh.log` on the Mac. Verified by execution in this session's cloud container
+against a real Postgres 16, on both migration paths.
+
 ### Completion Notes List
 
+**A NOTE ON HOW THIS STORY WAS BUILT, because it affects what to review.** The session's
+link to the Mac dropped mid-run. When it came back, part of this story was already on
+disk from the interrupted attempt - the contract, migration 011, `app/src/tenant/settings.ts`,
+and edits to `roles.ts`, `provision.ts` and `tests/unit/tenant.test.ts` - and I had no
+record of writing any of it. Worse, before noticing, I overwrote `core/src/tenant/settings.ts`
+with a fresh version against a different API, which broke the app handler that depended
+on it. The reconciliation was deliberate rather than a merge: the surviving work was
+coherent and good, so **core was rewritten to the API the rest of it expects** rather
+than half of each being kept. Nothing here is a blend of two designs, but this file is
+the only record that there were two.
+
+**The prerequisite held, and that was worth checking first.** The story warns that if
+Story 1.2 had COPIED default values at creation, this story could not be built and 1.2
+would have to be corrected. It did not - `property_settings.inherits_version` plus an
+`overrides` map, with 1.2's own comment already reading "a key present here stops
+inheriting FOREVER - AC of Story 1.6". So migration 011 adds **no new table**: two
+governance defaults, one `updated_by` column, two permissions and a comment.
+
+**The blast radius is computed live, in one query.** The story says a cached count that
+is wrong is worse than no count, and a 200-Property Tenant (NFR-4) makes an unannounced
+change a 200-Property incident. Every Property's override set is read in a single query
+and the counts derived from it, rather than a count per key - N round trips can disagree
+with each other inside one response, and the number's whole value is that it describes
+the moment the administrator is looking at. **Deactivated Properties are excluded**: one
+accepts no new work (Story 1.2 AC-3), so counting it overstates what a change reaches.
+The count also names WHO is unaffected and what they hold instead - "3 of 5" without the
+names is a number nobody can act on.
+
+**A TENANT-ONLY setting reports a blast radius of every Property**, not zero, because
+nobody can decline it. That is the honest number and the more alarming one.
+
+**The override is permanent by construction.** Presence of the key stops inheritance -
+never a comparison of values - so a Property that overrode `locale` to `ar` stays on
+`ar` even when the Tenant moves to `ar` and then away again. The boundary test runs the
+matrix **twice in a row** because "override until the Tenant value changes" is the wrong
+model that passes a single pass, and negative control 50 implements exactly that wrong
+model to prove the suite catches it. There is deliberately no "re-inherit" operation:
+adding one would be a deliberate act with its own audit entry, not a side effect.
+
+**One resolution serves both surfaces**, as the structure note requires. `resolveEffective`
+in `core/` decides what is in force; the Tenant view and the Property view both render
+from it, and a test asserts the two agree about the same Property.
+
+**Governance settings are refused at a Property, not ignored** (AC-3). Silently dropping
+the field would leave a property administrator believing their Property had opted out of
+the Tenant's retention policy - the belief that makes a governance setting worthless. At
+the Tenant they are attributed with actor, timestamp and previous value, marked **as
+governance** in the entry so a later reader can find every change to guest-history
+sharing or retention without knowing which keys those were at the time, and recorded with
+**the blast radius at the moment of the change** - which cannot be reconstructed once
+overrides have moved.
+
+**Region is absent rather than disabled** (AC-4). There is no region setting in the
+catalogue, so `PATCH` naming one is refused as an unknown key on both surfaces; the
+Tenant surface carries a read-only per-Property summary, and the Property surface states
+`regionImmutable` as Story 1.2 established.
+
+**RAISED, NOT DECIDED: the two retention figures.** The PRD says "Tenant-configurable
+retention within a platform maximum" and states no numbers. 365 days by default within a
+maximum of 730 is the conventional pair and is what is implemented, but it is **proposed
+rather than settled** - a retention period is a commitment to a hotel's guests and
+Jazzware should choose it on purpose. Both the catalogue and migration 011 say so in
+place. Related: **nothing enforces retention yet** - no purge exists until the story that
+owns erasure - so it is a stored commitment, not a running one.
+
+**Only one inheritable default exists today**, and that is the honest state of the system
+rather than a thin implementation: SLA targets arrive in 1.8 and escalation in 1.9, and
+inventing placeholders now would be designing those stories from inside this one. The
+mechanism is general - adding a default is one line in the catalogue, and the blast
+radius, the override path, validation and both surfaces pick it up.
+
+**Story 1.4's immutability trigger, third outing.** Two permissions had to join the
+shipped property administrator, so migration 011 drops the trigger, makes the change
+where somebody reviews it, and puts it back. Two permissions and not one because the acts
+have different scopes: `settings.manage` is Tenant-wide, `property.settings.write` is
+Property-level - requiring Tenant-wide authority to override a default for your own
+Property would be requiring the wrong thing. **Reading the blast radius needs only
+`property.read`**: gating the number behind the authority to change it would mean the
+only people who can see a consequence are the ones who have already decided they can
+live with it.
+
+**VERIFIED BY EXECUTION.** Migration 011 applied on top of an already-migrated 001-010
+database, and all eleven from scratch. **230/230 tests each way, and 50 of 52 negative
+controls red-verified** - 0 failures, 1 unverifiable (the Dart half, no SDK), 1 skipped
+(console dependencies). All four new controls go red on demand.
+
 ### File List
+
+**New**
+
+- `ops/migrations/011_tenant_settings.sql`
+- `core/src/tenant/settings.ts` - the catalogue, validation and the one resolution
+- `app/src/tenant/settings.ts` - blast radius, both surfaces, the audit trail
+- `tests/unit/tenant-settings.test.ts` (17 tests), `tests/tenant-settings.test.ts`
+
+**Changed**
+
+- `contracts/openapi.yaml` - `GET/PATCH /tenant/settings`, `GET/PATCH /properties/{id}/settings`
+- `core/src/staff/roles.ts` - `settings.manage`, `property.settings.write`
+- `core/src/tenant/provision.ts` - platform defaults derived from the catalogue
+- `app/src/staff/sessions.ts` - a Property-scoped event may now carry its Property
+- `edge/src/server.ts` - both settings surfaces
+- `tests/unit/tenant.test.ts`

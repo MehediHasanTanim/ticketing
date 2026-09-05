@@ -3,6 +3,7 @@ import {
   provisionTenant, deactivateTenant, SHIPPED_ROLES, PLATFORM_DEFAULTS,
   ValidationError, ConflictError,
 } from '../../core/src/tenant/provision';
+import { SETTING_KEYS } from '../../core/src/tenant/settings';
 
 /**
  * The Tenant aggregate, unit-tested with a FAKE CLOCK and no ports at all - a
@@ -44,7 +45,12 @@ describe('provisioning a Tenant (Story 1.1, FR-1)', () => {
     // that endpoint answers identically whether or not it resolves.
     expect(Object.keys(event.payload).sort()).toEqual(
       ['defaults', 'firstAdministratorInvitationId', 'name', 'roles', 'slug']);
-    expect(Object.keys(event.payload.defaults).sort()).toEqual(['locale', 'mfaRequired']);
+    // Derived from the settings catalogue since Story 1.6, rather than restated - so a
+    // key added there reaches new Tenants without a second edit somebody has to
+    // remember, which is how a governance key ends up existing for old Tenants and not
+    // new ones. Asserted against the catalogue for the same reason.
+    expect(Object.keys(event.payload.defaults).sort()).toEqual([...SETTING_KEYS].sort());
+    expect(event.payload.defaults.crossTenantGuestHistory).toBe(false);
   });
 
   it('derives a slug from the name, so a Tenant is addressable before it has a credential', () => {
@@ -59,6 +65,9 @@ describe('provisioning a Tenant (Story 1.1, FR-1)', () => {
       { name: 'Seaside Group', firstAdministratorEmail: 'gm@seaside.test' }, AT, fixedRand);
     expect(event.payload.defaults).toEqual({ ...PLATFORM_DEFAULTS });
     expect(PLATFORM_DEFAULTS.mfaRequired).toBe(false);
+    // FR-45's default is the point: cross-Tenant guest history widens who can see one
+    // guest's history across a management company, so it is off until somebody decides.
+    expect(PLATFORM_DEFAULTS.crossTenantGuestHistory).toBe(false);
   });
 
   it('uses the domain clock for both stamps, and takes neither from the machine', () => {

@@ -78,6 +78,15 @@ export const PERMISSIONS = {
   // authenticate, for the whole Tenant - so it is Tenant-scope, and it depends on
   // nothing: it is not a deeper form of any other permission.
   'identity.manage': { class: 'configuration', minimumScope: 'tenant', dependsOn: [] },
+  // Story 1.6. Changing a Tenant default changes it for every Property that inherits
+  // it - a 200-Property estate is a 200-Property change - so it is Tenant-scope.
+  'settings.manage': { class: 'configuration', minimumScope: 'tenant', dependsOn: ['property.read'] },
+  // Taking a default over for ONE Property is a Property-level act. Requiring
+  // Tenant-wide authority would mean a property administrator could not override a
+  // default for their own Property, which is what overrides are for.
+  'property.settings.write': {
+    class: 'configuration', minimumScope: 'property', dependsOn: ['property.setup.read'],
+  },
 } as const satisfies Record<string, PermissionSpec>;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -112,6 +121,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<string, readonly Permission[]>> =
   property_administrator: [
     'property.read', 'property.create', 'property.deactivate', 'property.setup.read',
     'staff.read', 'staff.invite', 'role.read', 'role.define', 'identity.manage',
+    'settings.manage', 'property.settings.write',
   ],
   // A VIEWER: reads, never writes. Its authority is the Tenant (AC-5), which is why
   // it is one of the two roles assignable Tenant-wide.

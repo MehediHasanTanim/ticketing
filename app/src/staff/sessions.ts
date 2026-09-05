@@ -621,10 +621,20 @@ export async function issueRefreshToken(
  */
 export async function appendStaffEvent(
   client: PoolClient,
-  e: { eventId: string; type: string; tenantId: string; occurredAt: string; recordedAt: string; payload: unknown },
+  e: {
+    eventId: string; type: string; tenantId: string; occurredAt: string; recordedAt: string;
+    payload: unknown;
+    /**
+     * Present when the fact really is about one Property - a setting overridden there,
+     * say (Story 1.6). AD-3's exception list exists for facts that name NO Property, and
+     * an event that has one should carry it rather than take the exception out of habit.
+     */
+    propertyId?: string;
+  },
 ): Promise<void> {
   await client.query(
     `INSERT INTO control_plane.events (event_id, type, tenant_id, property_id, occurred_at, recorded_at, payload)
-     VALUES ($1, $2, $3, NULL, $4, $5, $6)`,
-    [e.eventId, e.type, e.tenantId, e.occurredAt, e.recordedAt, JSON.stringify(e.payload)]);
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [e.eventId, e.type, e.tenantId, e.propertyId ?? null, e.occurredAt, e.recordedAt,
+     JSON.stringify(e.payload)]);
 }
